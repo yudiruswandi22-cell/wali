@@ -81,7 +81,9 @@
             allUsers: {},
             dosenList: [],
             mahasiswaList: [],
+            mataKuliahList: [],
             loadingUsers: true,
+            loadingMataKuliah: true,
             notification: null,
             modal: { isOpen: false, type: '', data: null },
             selectedStudentId: null,
@@ -104,8 +106,8 @@
         }
         
         function renderContent() {
-             if (!state.isAuthReady || state.loadingUsers || state.loadingSettings) {
-                return `<div class="text-center p-10 flex-grow flex items-center justify-center">Memuat data pengguna...</div>`;
+             if (!state.isAuthReady || state.loadingUsers || state.loadingSettings || state.loadingMataKuliah) {
+                return `<div class="text-center p-10 flex-grow flex items-center justify-center">Memuat data...</div>`;
             }
 
             const usersForLogin = { ...state.allUsers, 'admin_001': { id: 'admin_001', name: 'Administrator', role: 'admin' } };
@@ -114,7 +116,7 @@
                 return LoginPageHTML(usersForLogin);
             }
             if (state.currentUser.role === 'admin') {
-                return AdminDashboardHTML(state.allUsers, state.dosenList, state.mahasiswaList);
+                return AdminDashboardHTML(state.allUsers, state.dosenList, state.mahasiswaList, state.mataKuliahList);
             }
             if (state.currentUser.role === 'dosen') {
                 if (state.selectedStudentId) {
@@ -157,37 +159,19 @@
             // Admin Dashboard Buttons
             const addDosenBtn = document.getElementById('add-dosen-btn');
             if(addDosenBtn) addDosenBtn.addEventListener('click', () => openModal('addDosen'));
-
-            document.querySelectorAll('.edit-dosen-btn').forEach(btn => {
-                btn.addEventListener('click', (e) => {
-                    const dosenId = e.currentTarget.dataset.id;
-                    openModal('editDosen', state.allUsers[dosenId]);
-                });
-            });
-
-            document.querySelectorAll('.delete-dosen-btn').forEach(btn => {
-                btn.addEventListener('click', (e) => {
-                    const dosenId = e.currentTarget.dataset.id;
-                    handleDeleteUser(dosenId, 'dosen');
-                });
-            });
+            document.querySelectorAll('.edit-dosen-btn').forEach(btn => btn.addEventListener('click', (e) => openModal('editDosen', state.allUsers[e.currentTarget.dataset.id])));
+            document.querySelectorAll('.delete-dosen-btn').forEach(btn => btn.addEventListener('click', (e) => handleDeleteUser(e.currentTarget.dataset.id, 'dosen')));
 
             const addMhsBtn = document.getElementById('add-mhs-btn');
             if(addMhsBtn) addMhsBtn.addEventListener('click', () => openModal('addMhs'));
-            
-            document.querySelectorAll('.edit-mhs-btn').forEach(btn => {
-                btn.addEventListener('click', (e) => {
-                    const mhsId = e.currentTarget.dataset.id;
-                    openModal('editMhs', state.allUsers[mhsId]);
-                });
-            });
-            
-             document.querySelectorAll('.delete-mhs-btn').forEach(btn => {
-                btn.addEventListener('click', (e) => {
-                    const mhsId = e.currentTarget.dataset.id;
-                    handleDeleteUser(mhsId, 'mahasiswa');
-                });
-            });
+            document.querySelectorAll('.edit-mhs-btn').forEach(btn => btn.addEventListener('click', (e) => openModal('editMhs', state.allUsers[e.currentTarget.dataset.id])));
+            document.querySelectorAll('.delete-mhs-btn').forEach(btn => btn.addEventListener('click', (e) => handleDeleteUser(e.currentTarget.dataset.id, 'mahasiswa')));
+
+            const addMkBtn = document.getElementById('add-mk-btn');
+            if (addMkBtn) addMkBtn.addEventListener('click', () => openModal('addMk'));
+            document.querySelectorAll('.edit-mk-btn').forEach(btn => btn.addEventListener('click', (e) => openModal('editMk', state.mataKuliahList.find(mk => mk.id === e.currentTarget.dataset.id))));
+            document.querySelectorAll('.delete-mk-btn').forEach(btn => btn.addEventListener('click', (e) => handleDeleteCourse(e.currentTarget.dataset.id)));
+
 
             // Admin: Academic Year Management
             const addYearForm = document.getElementById('add-year-form');
@@ -211,10 +195,23 @@
                 });
             });
             
-            // Perwalian Channel
+            // Perwalian Channel & KRS (initial attachment)
+            attachPerwalianListeners();
+        }
+
+        function attachPerwalianListeners() {
             const sendMessageForm = document.getElementById('send-message-form');
             if(sendMessageForm) sendMessageForm.addEventListener('submit', handleSendMessage);
+            
+            const krsForm = document.getElementById('krs-form');
+            if (krsForm) krsForm.addEventListener('submit', handleAjukanKrs);
+            if (krsForm) krsForm.addEventListener('change', updateTotalSks);
 
+            const approveKrsBtn = document.getElementById('approve-krs-btn');
+            if (approveKrsBtn) approveKrsBtn.addEventListener('click', handleApproveKrs);
+
+            const rejectKrsBtn = document.getElementById('reject-krs-btn');
+            if (rejectKrsBtn) rejectKrsBtn.addEventListener('click', handleRejectKrs);
         }
         
         // --- HANDLER FUNCTIONS ---
@@ -260,11 +257,10 @@
             const input = document.getElementById('new-year-input');
             const year = input.value.trim();
             if (year && /^\d{4}\/\d{4}$/.test(year)) {
-                // Ganti '/' dengan '-' untuk ID dokumen yang valid
                 const docId = year.replace('/', '-');
                 try {
                     await setDoc(doc(db, `/artifacts/${appId}/public/data/academic_years`, docId), { name: year });
-                    setNotification({ type: 'success', message: `Tahun akademik ${year} berhasil ditambahkan.` });
+                    setNotification({ type: 'success', message: `Tahun Akademik ${year} berhasil ditambahkan.` });
                     input.value = '';
                 } catch (error) {
                     console.error("Error adding academic year:", error);
@@ -276,9 +272,9 @@
         }
 
         async function handleSetActiveAcademicYear(e) {
-            const year = e.target.value;
+            const yearId = e.target.value;
             try {
-                await setDoc(doc(db, `/artifacts/${appId}/public/data/settings`, 'app_config'), { activeAcademicYear: year });
+                await setDoc(doc(db, `/artifacts/${appId}/public/data/settings`, 'app_config'), { activeAcademicYear: yearId });
                 setNotification({ type: 'success', message: 'Tahun akademik aktif telah diperbarui.' });
             } catch (error) {
                 console.error("Error setting active academic year:", error);
@@ -295,18 +291,33 @@
             const id = form.dataset.id;
             
             try {
-                if (type === 'addDosen') {
-                    await addDoc(collection(db, `/artifacts/${appId}/public/data/users`), { ...data, role: 'dosen' });
-                    setNotification({ type: 'success', message: 'Dosen berhasil ditambahkan!' });
-                } else if (type === 'editDosen') {
-                    await updateDoc(doc(db, `/artifacts/${appId}/public/data/users`, id), data);
-                    setNotification({ type: 'success', message: 'Data dosen berhasil diperbarui!' });
-                } else if (type === 'addMhs') {
-                    await addDoc(collection(db, `/artifacts/${appId}/public/data/users`), { ...data, role: 'mahasiswa' });
-                    setNotification({ type: 'success', message: 'Mahasiswa berhasil ditambahkan!' });
-                } else if (type === 'editMhs') {
-                    await updateDoc(doc(db, `/artifacts/${appId}/public/data/users`, id), data);
-                    setNotification({ type: 'success', message: 'Data mahasiswa berhasil diperbarui!' });
+                if (type === 'addDosen' || type === 'editDosen') {
+                    const payload = { ...data, role: 'dosen' };
+                    if (type === 'addDosen') {
+                        await addDoc(collection(db, `/artifacts/${appId}/public/data/users`), payload);
+                        setNotification({ type: 'success', message: 'Dosen berhasil ditambahkan!' });
+                    } else {
+                        await updateDoc(doc(db, `/artifacts/${appId}/public/data/users`, id), payload);
+                        setNotification({ type: 'success', message: 'Data dosen berhasil diperbarui!' });
+                    }
+                } else if (type === 'addMhs' || type === 'editMhs') {
+                    const payload = { ...data, role: 'mahasiswa' };
+                    if (type === 'addMhs') {
+                        await addDoc(collection(db, `/artifacts/${appId}/public/data/users`), payload);
+                        setNotification({ type: 'success', message: 'Mahasiswa berhasil ditambahkan!' });
+                    } else {
+                        await updateDoc(doc(db, `/artifacts/${appId}/public/data/users`, id), payload);
+                        setNotification({ type: 'success', message: 'Data mahasiswa berhasil diperbarui!' });
+                    }
+                } else if (type === 'addMk' || type === 'editMk') {
+                    const payload = { ...data, sks: Number(data.sks) }; // Pastikan SKS adalah angka
+                     if (type === 'addMk') {
+                        await addDoc(collection(db, `/artifacts/${appId}/public/data/mata_kuliah`), payload);
+                        setNotification({ type: 'success', message: 'Mata kuliah berhasil ditambahkan!' });
+                    } else {
+                        await updateDoc(doc(db, `/artifacts/${appId}/public/data/mata_kuliah`, id), payload);
+                        setNotification({ type: 'success', message: 'Data mata kuliah berhasil diperbarui!' });
+                    }
                 }
                 closeModal();
             } catch (error) {
@@ -316,7 +327,6 @@
         }
 
         async function handleDeleteUser(userId, role) {
-            // This is a simple confirmation. For a real app, use a custom modal.
             if (confirm(`Apakah Anda yakin ingin menghapus ${role} ini?`)) {
                 try {
                     await deleteDoc(doc(db, `/artifacts/${appId}/public/data/users`, userId));
@@ -328,18 +338,27 @@
             }
         }
 
+        async function handleDeleteCourse(courseId) {
+             if (confirm(`Apakah Anda yakin ingin menghapus mata kuliah ini?`)) {
+                try {
+                    await deleteDoc(doc(db, `/artifacts/${appId}/public/data/mata_kuliah`, courseId));
+                    setNotification({ type: 'success', message: `Mata kuliah berhasil dihapus.` });
+                } catch (error) {
+                    console.error(`Error deleting course:`, error);
+                    setNotification({ type: 'error', message: `Gagal menghapus mata kuliah.` });
+                }
+            }
+        }
+
         async function handleSendMessage(e) {
             e.preventDefault();
             const newMessageInput = document.getElementById('new-message-input');
-            const messageTypeSelect = document.getElementById('message-type-select');
             const newMessage = newMessageInput.value;
-            const messageType = messageTypeSelect ? messageTypeSelect.value : 'permohonan';
+            const messageType = e.target.querySelector('#message-type-select')?.value || 'permohonan';
             const otherUserId = e.target.dataset.otheruser;
 
-            if (newMessage.trim() === '') {
-                setNotification({ type: 'error', message: 'Pesan tidak boleh kosong!' });
-                return;
-            }
+            if (newMessage.trim() === '') return;
+
             const messagePayload = {
                 id: `${state.currentUser.id}_${Date.now()}`,
                 senderId: state.currentUser.id,
@@ -350,19 +369,103 @@
             const channelId = state.currentUser.role === 'dosen' ? `${state.currentUser.id}_${otherUserId}` : `${otherUserId}_${state.currentUser.id}`;
             const docRef = doc(db, `/artifacts/${appId}/public/data/perwalian_channels`, channelId);
             try {
-                await updateDoc(docRef, { messages: arrayUnion(messagePayload) });
-                setNotification({ type: 'success', message: 'Pesan berhasil dikirim!' });
-            } catch (error) {
-                if (error.code === 'not-found') {
-                    await setDoc(docRef, { messages: [messagePayload] });
-                     setNotification({ type: 'success', message: 'Pesan berhasil dikirim!' });
+                const docSnap = await getDoc(docRef);
+                if (docSnap.exists()) {
+                    await updateDoc(docRef, { messages: arrayUnion(messagePayload) });
                 } else {
-                    console.error("Error sending message:", error);
-                    setNotification({ type: 'error', message: 'Gagal mengirim pesan.' });
+                    await setDoc(docRef, { messages: [messagePayload] });
                 }
+                setNotification({ type: 'success', message: 'Pesan berhasil dikirim!' });
+                newMessageInput.value = '';
+            } catch (error) {
+                console.error("Error sending message:", error);
+                setNotification({ type: 'error', message: 'Gagal mengirim pesan.' });
             }
-            newMessageInput.value = ''; // Clear input after send
         }
+
+        function updateTotalSks() {
+            const form = document.getElementById('krs-form');
+            const totalSksEl = document.getElementById('total-sks');
+            if (!form || !totalSksEl) return;
+
+            let total = 0;
+            form.querySelectorAll('input[type="checkbox"]:checked').forEach(checkbox => {
+                total += Number(checkbox.dataset.sks);
+            });
+            totalSksEl.textContent = total;
+        }
+
+        async function handleAjukanKrs(e) {
+            e.preventDefault();
+            const form = e.target;
+            const selectedCourses = [];
+            form.querySelectorAll('input[type="checkbox"]:checked').forEach(checkbox => {
+                selectedCourses.push({
+                    id: checkbox.value,
+                    kode: checkbox.dataset.kode,
+                    nama: checkbox.dataset.nama,
+                    sks: Number(checkbox.dataset.sks)
+                });
+            });
+
+            if (selectedCourses.length === 0) {
+                setNotification({ type: 'error', message: 'Pilih minimal satu mata kuliah.' });
+                return;
+            }
+
+            const totalSks = selectedCourses.reduce((sum, course) => sum + course.sks, 0);
+            const krsSubmission = {
+                mahasiswaId: state.currentUser.id,
+                dosenId: state.currentUser.lecturerId,
+                tahunAkademik: state.currentUser.tahunAkademik,
+                status: 'Menunggu',
+                courses: selectedCourses,
+                totalSks: totalSks,
+                submittedAt: new Date().toISOString(),
+                reviewedAt: null,
+                dosenNotes: ''
+            };
+
+            const krsId = `${state.currentUser.tahunAkademik}_${state.currentUser.id}`;
+            try {
+                await setDoc(doc(db, `/artifacts/${appId}/public/data/krs_submissions`, krsId), krsSubmission);
+                setNotification({ type: 'success', message: 'KRS berhasil diajukan!' });
+            } catch (error) {
+                console.error("Error submitting KRS:", error);
+                setNotification({ type: 'error', message: 'Gagal mengajukan KRS.' });
+            }
+        }
+
+        async function handleApproveKrs(e) {
+            const krsId = e.currentTarget.dataset.krsid;
+            try {
+                await updateDoc(doc(db, `/artifacts/${appId}/public/data/krs_submissions`, krsId), {
+                    status: 'Disetujui',
+                    reviewedAt: new Date().toISOString()
+                });
+                setNotification({ type: 'success', message: 'KRS telah disetujui.' });
+            } catch (error) {
+                console.error("Error approving KRS:", error);
+                setNotification({ type: 'error', message: 'Gagal menyetujui KRS.' });
+            }
+        }
+        
+        async function handleRejectKrs(e) {
+            const krsId = e.currentTarget.dataset.krsid;
+            const notes = prompt("Silakan masukkan alasan penolakan (opsional):");
+            try {
+                await updateDoc(doc(db, `/artifacts/${appId}/public/data/krs_submissions`, krsId), {
+                    status: 'Ditolak',
+                    dosenNotes: notes || '',
+                    reviewedAt: new Date().toISOString()
+                });
+                setNotification({ type: 'success', message: 'KRS telah ditolak.' });
+            } catch (error) {
+                console.error("Error rejecting KRS:", error);
+                setNotification({ type: 'error', message: 'Gagal menolak KRS.' });
+            }
+        }
+
         
         // --- HTML TEMPLATE FUNCTIONS (Komponen) ---
         function AppHeaderHTML() {
@@ -398,8 +501,8 @@
 
         function LoginPageHTML(users) {
             const userList = Object.values(users);
-            const dosenList = userList.filter(u => u.role === 'dosen');
-            const mahasiswaList = userList.filter(u => u.role === 'mahasiswa');
+            const dosenList = userList.filter(u => u.role === 'dosen').sort((a,b) => a.name.localeCompare(b.name));
+            const mahasiswaList = userList.filter(u => u.role === 'mahasiswa').sort((a,b) => a.name.localeCompare(b.name));
 
             return `
             <div class="flex-grow flex items-center justify-center p-4">
@@ -420,17 +523,14 @@
             </div>`;
         }
         
-        function AdminDashboardHTML(users, dosen, mahasiswa) {
+        function AdminDashboardHTML(users, dosen, mahasiswa, mataKuliah) {
             const sortedDosen = [...dosen].sort((a, b) => a.name.localeCompare(b.name));
             const sortedMahasiswa = [...mahasiswa].sort((a, b) => a.name.localeCompare(b.name));
+            const sortedMataKuliah = [...mataKuliah].sort((a, b) => a.nama.localeCompare(b.nama));
             
-            const filteredDosen = state.activeAcademicYear
-                ? sortedDosen.filter(d => d.tahunAkademik === state.activeAcademicYear)
-                : sortedDosen;
-
-            const filteredMahasiswa = state.activeAcademicYear
-                ? sortedMahasiswa.filter(m => m.tahunAkademik === state.activeAcademicYear)
-                : sortedMahasiswa;
+            const filteredDosen = state.activeAcademicYear ? sortedDosen.filter(d => d.tahunAkademik === state.activeAcademicYear) : sortedDosen;
+            const filteredMahasiswa = state.activeAcademicYear ? sortedMahasiswa.filter(m => m.tahunAkademik === state.activeAcademicYear) : sortedMahasiswa;
+            const filteredMataKuliah = state.activeAcademicYear ? sortedMataKuliah.filter(mk => mk.tahunAkademik === state.activeAcademicYear) : sortedMataKuliah;
 
             return `
             <div class="container mx-auto p-4 space-y-6">
@@ -458,6 +558,20 @@
                         </div>
                     </div>
                 </div>
+                
+                <!-- Manajemen Mata Kuliah -->
+                <div class="bg-white p-6 rounded-lg shadow-lg">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-xl font-semibold text-gray-700">Data Mata Kuliah</h3>
+                        <button id="add-mk-btn" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg">Tambah MK</button>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm text-left text-gray-500">
+                            <thead class="text-xs text-gray-700 uppercase bg-gray-50"><tr><th class="px-6 py-3">Kode</th><th class="px-6 py-3">Nama Mata Kuliah</th><th class="px-6 py-3">SKS</th><th class="px-6 py-3">Prasyarat</th><th class="px-6 py-3">T.A.</th><th class="px-6 py-3">Aksi</th></tr></thead>
+                            <tbody>${filteredMataKuliah.map(mk => `<tr class="bg-white border-b"><td class="px-6 py-4 font-medium text-gray-900">${mk.kode}</td><td class="px-6 py-4">${mk.nama}</td><td class="px-6 py-4">${mk.sks}</td><td class="px-6 py-4">${mk.prasyarat || '-'}</td><td class="px-6 py-4">${state.academicYears.find(y=>y.id===mk.tahunAkademik)?.name}</td><td class="px-6 py-4 space-x-2"><button data-id="${mk.id}" class="edit-mk-btn font-medium text-blue-600 hover:underline">Edit</button><button data-id="${mk.id}" class="delete-mk-btn font-medium text-red-600 hover:underline">Hapus</button></td></tr>`).join('')}</tbody>
+                        </table>
+                    </div>
+                </div>
 
                 <div class="bg-white p-6 rounded-lg shadow-lg">
                     <div class="flex justify-between items-center mb-4">
@@ -467,7 +581,7 @@
                     <div class="overflow-x-auto">
                         <table class="w-full text-sm text-left text-gray-500">
                             <thead class="text-xs text-gray-700 uppercase bg-gray-50"><tr><th class="px-6 py-3">Nama</th><th class="px-6 py-3">NIDN</th><th class="px-6 py-3">Jabatan</th><th class="px-6 py-3">T.A.</th><th class="px-6 py-3">Aksi</th></tr></thead>
-                            <tbody>${filteredDosen.map(d => `<tr class="bg-white border-b"><td class="px-6 py-4 font-medium text-gray-900">${d.name}</td><td class="px-6 py-4">${d.nidn}</td><td class="px-6 py-4">${d.jabatan}</td><td class="px-6 py-4">${state.allUsers[d.tahunAkademik]?.name || d.tahunAkademik}</td><td class="px-6 py-4 space-x-2"><button data-id="${d.id}" class="edit-dosen-btn font-medium text-blue-600 hover:underline">Edit</button><button data-id="${d.id}" class="delete-dosen-btn font-medium text-red-600 hover:underline">Hapus</button></td></tr>`).join('')}</tbody>
+                            <tbody>${filteredDosen.map(d => `<tr class="bg-white border-b"><td class="px-6 py-4 font-medium text-gray-900">${d.name}</td><td class="px-6 py-4">${d.nidn}</td><td class="px-6 py-4">${d.jabatan}</td><td class="px-6 py-4">${state.academicYears.find(y=>y.id===d.tahunAkademik)?.name}</td><td class="px-6 py-4 space-x-2"><button data-id="${d.id}" class="edit-dosen-btn font-medium text-blue-600 hover:underline">Edit</button><button data-id="${d.id}" class="delete-dosen-btn font-medium text-red-600 hover:underline">Hapus</button></td></tr>`).join('')}</tbody>
                         </table>
                     </div>
                 </div>
@@ -480,7 +594,7 @@
                     <div class="overflow-x-auto">
                         <table class="w-full text-sm text-left text-gray-500">
                             <thead class="text-xs text-gray-700 uppercase bg-gray-50"><tr><th class="px-6 py-3">Nama</th><th class="px-6 py-3">NIM</th><th class="px-6 py-3">Prodi</th><th class="px-6 py-3">Semester</th><th class="px-6 py-3">T.A.</th><th class="px-6 py-3">Dosen Wali</th><th class="px-6 py-3">Aksi</th></tr></thead>
-                            <tbody>${filteredMahasiswa.map(m => `<tr class="bg-white border-b"><td class="px-6 py-4 font-medium text-gray-900">${m.name}</td><td class="px-6 py-4">${m.nim}</td><td class="px-6 py-4">${m.prodi}</td><td class="px-6 py-4">${m.semester}</td><td class="px-6 py-4">${state.allUsers[m.tahunAkademik]?.name || m.tahunAkademik}</td><td class="px-6 py-4">${users[m.lecturerId]?.name || 'N/A'}</td><td class="px-6 py-4 space-x-2"><button data-id="${m.id}" class="edit-mhs-btn font-medium text-blue-600 hover:underline">Edit</button><button data-id="${m.id}" class="delete-mhs-btn font-medium text-red-600 hover:underline">Hapus</button></td></tr>`).join('')}</tbody>
+                            <tbody>${filteredMahasiswa.map(m => `<tr class="bg-white border-b"><td class="px-6 py-4 font-medium text-gray-900">${m.name}</td><td class="px-6 py-4">${m.nim}</td><td class="px-6 py-4">${m.prodi}</td><td class="px-6 py-4">${m.semester}</td><td class="px-6 py-4">${state.academicYears.find(y=>y.id===m.tahunAkademik)?.name}</td><td class="px-6 py-4">${users[m.lecturerId]?.name || 'N/A'}</td><td class="px-6 py-4 space-x-2"><button data-id="${m.id}" class="edit-mhs-btn font-medium text-blue-600 hover:underline">Edit</button><button data-id="${m.id}" class="delete-mhs-btn font-medium text-red-600 hover:underline">Hapus</button></td></tr>`).join('')}</tbody>
                         </table>
                     </div>
                 </div>
@@ -502,7 +616,7 @@
                     <div class="space-y-3">
                         ${mahasiswaBinaan.length > 0 ? mahasiswaBinaan.map(student => `
                             <button data-id="${student.id}" class="select-student-btn w-full text-left p-4 bg-gray-50 hover:bg-green-100 rounded-lg border border-gray-200 transition duration-300">
-                                ${student.name}
+                                ${student.name} <span class="text-sm text-gray-500">(${student.nim})</span>
                             </button>
                         `).join('') : '<p class="text-gray-500">Belum ada mahasiswa binaan.</p>'}
                     </div>
@@ -511,7 +625,7 @@
         }
         
         function ModalHTML(type, data, dosenList) {
-            const title = { addDosen: 'Tambah Dosen Wali Baru', editDosen: 'Edit Data Dosen Wali', addMhs: 'Tambah Mahasiswa Baru', editMhs: 'Edit Data Mahasiswa' }[type];
+            const title = { addDosen: 'Tambah Dosen Wali Baru', editDosen: 'Edit Data Dosen Wali', addMhs: 'Tambah Mahasiswa Baru', editMhs: 'Edit Data Mahasiswa', addMk: 'Tambah Mata Kuliah', editMk: 'Edit Mata Kuliah' }[type];
             let formContent = '';
             const academicYearsOptions = state.academicYears.map(y => `<option value="${y.id}" ${data?.tahunAkademik === y.id ? 'selected' : ''}>${y.name}</option>`).join('');
 
@@ -520,7 +634,7 @@
                     <div><label class="block text-sm font-medium">Nama Lengkap</label><input type="text" name="name" value="${data?.name || ''}" class="w-full p-2 border rounded" required /></div>
                     <div><label class="block text-sm font-medium">NIDN</label><input type="text" name="nidn" value="${data?.nidn || ''}" class="w-full p-2 border rounded" required /></div>
                     <div><label class="block text-sm font-medium">Jabatan</label><input type="text" name="jabatan" value="${data?.jabatan || ''}" class="w-full p-2 border rounded" required /></div>
-                     <div><label class="block text-sm font-medium">Tahun Akademik Aktif</label><select name="tahunAkademik" class="w-full p-2 border rounded" required><option value="" disabled selected>-- Pilih Tahun --</option>${academicYearsOptions}</select></div>
+                     <div><label class="block text-sm font-medium">Tahun Akademik</label><select name="tahunAkademik" class="w-full p-2 border rounded" required><option value="" disabled selected>-- Pilih Tahun --</option>${academicYearsOptions}</select></div>
                 `;
             } else if (type.includes('Mhs')) {
                 formContent = `
@@ -528,18 +642,26 @@
                     <div><label class="block text-sm font-medium">NIM</label><input type="text" name="nim" value="${data?.nim || ''}" class="w-full p-2 border rounded" required /></div>
                     <div><label class="block text-sm font-medium">Program Studi</label><select name="prodi" class="w-full p-2 border rounded"><option value="PAI" ${data?.prodi === 'PAI' ? 'selected' : ''}>PAI</option><option value="HES" ${data?.prodi === 'HES' ? 'selected' : ''}>HES</option></select></div>
                     <div><label class="block text-sm font-medium">Semester</label><input type="text" inputmode="numeric" name="semester" value="${data?.semester || ''}" class="w-full p-2 border rounded" required /></div>
-                    <div><label class="block text-sm font-medium">Tahun Akademik Aktif</label><select name="tahunAkademik" class="w-full p-2 border rounded" required><option value="" disabled selected>-- Pilih Tahun --</option>${academicYearsOptions}</select></div>
+                    <div><label class="block text-sm font-medium">Tahun Akademik</label><select name="tahunAkademik" class="w-full p-2 border rounded" required><option value="" disabled selected>-- Pilih Tahun --</option>${academicYearsOptions}</select></div>
                     <div><label class="block text-sm font-medium">Dosen Wali</label>
                         <select name="lecturerId" class="w-full p-2 border rounded" required>
                             <option value="" disabled>-- Pilih Dosen Wali --</option>
                             ${dosenList.map(d => `<option value="${d.id}" ${data?.lecturerId === d.id ? 'selected' : ''}>${d.name}</option>`).join('')}
                         </select>
                     </div>`;
+            } else if (type.includes('Mk')) {
+                formContent = `
+                    <div><label class="block text-sm font-medium">Kode Mata Kuliah</label><input type="text" name="kode" value="${data?.kode || ''}" class="w-full p-2 border rounded" required /></div>
+                    <div><label class="block text-sm font-medium">Nama Mata Kuliah</label><input type="text" name="nama" value="${data?.nama || ''}" class="w-full p-2 border rounded" required /></div>
+                    <div><label class="block text-sm font-medium">Jumlah SKS</label><input type="number" name="sks" value="${data?.sks || ''}" class="w-full p-2 border rounded" required /></div>
+                    <div><label class="block text-sm font-medium">Mata Kuliah Prasyarat (Opsional)</label><input type="text" name="prasyarat" value="${data?.prasyarat || ''}" class="w-full p-2 border rounded" /></div>
+                    <div><label class="block text-sm font-medium">Tahun Akademik</label><select name="tahunAkademik" class="w-full p-2 border rounded" required><option value="" disabled selected>-- Pilih Tahun --</option>${academicYearsOptions}</select></div>
+                `;
             }
             
             return `
-            <div id="modal-backdrop" class="fixed inset-0 bg-black bg-opacity-50 z-50 flex justify-center items-center">
-                <div class="bg-white p-6 rounded-lg shadow-xl w-full max-w-lg relative">
+            <div id="modal-backdrop" class="fixed inset-0 bg-black bg-opacity-50 z-50 flex justify-center items-center p-4">
+                <div class="bg-white p-6 rounded-lg shadow-xl w-full max-w-lg relative max-h-full overflow-y-auto">
                     <button id="modal-close-btn" class="absolute top-2 right-2 text-gray-500 hover:text-gray-800 text-2xl">&times;</button>
                     <form id="user-form" data-type="${type}" data-id="${data?.id || ''}" class="space-y-4">
                         <h3 class="text-xl font-semibold">${title}</h3>
@@ -551,71 +673,165 @@
         }
         
         function PerwalianChannelHTML(user, otherUserId, allUsers) {
-            const otherUserName = allUsers[otherUserId]?.name || 'Memuat...';
-            const channelId = user.role === 'dosen' ? `${user.id}_${otherUserId}` : `${otherUserId}_${user.id}`;
-            const docRef = doc(db, `/artifacts/${appId}/public/data/perwalian_channels`, channelId);
+            const isDosen = user.role === 'dosen';
+            const mahasiswa = isDosen ? allUsers[otherUserId] : user;
+            const dosen = isDosen ? user : allUsers[otherUserId];
+            const otherUserName = isDosen ? mahasiswa.name : dosen.name;
+            const tahunAkademikNama = state.academicYears.find(y => y.id === mahasiswa.tahunAkademik)?.name || mahasiswa.tahunAkademik;
 
-            let messagesHTML = '<p>Memuat percakapan...</p>';
+            const channelId = `${dosen.id}_${mahasiswa.id}`;
+            const krsId = `${mahasiswa.tahunAkademik}_${mahasiswa.id}`;
             
-            // Menggunakan onSnapshot untuk real-time update, lalu render ulang bagian pesan
-            onSnapshot(docRef, (docSnap) => {
-                const channelData = docSnap.exists() ? docSnap.data() : { messages: [] };
-                const sortedMessages = [...(channelData.messages || [])].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp)); // Ascending
-                const messageContainer = document.getElementById('messages-container');
-                if (messageContainer) {
-                    if (sortedMessages.length > 0) {
-                        messageContainer.innerHTML = sortedMessages.map(msg => {
-                            const isYou = msg.senderId === user.id;
-                            const senderName = isYou ? "Anda" : allUsers[msg.senderId]?.name;
-                            return `
-                            <div class="p-4 rounded-lg ${isYou ? 'bg-green-100 border-l-4 border-green-500' : 'bg-gray-100 border-l-4 border-gray-400'}">
-                                <div class="flex justify-between items-center"><p class="font-bold text-sm text-gray-800">${senderName}</p><span class="text-xs font-semibold px-2 py-1 rounded-full ${msg.type === 'jadwal' ? 'bg-yellow-200 text-yellow-800' : 'bg-blue-200 text-blue-800'}">${msg.type}</span></div>
-                                <p class="text-gray-700 mt-2">${msg.content.replace(/\n/g, '<br>')}</p>
-                                <p class="text-right text-xs text-gray-500 mt-2">${new Date(msg.timestamp).toLocaleString('id-ID')}</p>
-                            </div>`;
-                        }).join('');
-                    } else {
-                        messageContainer.innerHTML = '<p class="text-gray-500 text-center py-4">Belum ada percakapan.</p>';
-                    }
-                     messageContainer.scrollTop = messageContainer.scrollHeight; // Auto-scroll
+            onSnapshot(doc(db, `/artifacts/${appId}/public/data/krs_submissions`, krsId), (docSnap) => {
+                const krsSubmission = docSnap.exists() ? { id: docSnap.id, ...docSnap.data() } : null;
+                const availableCourses = state.mataKuliahList.filter(mk => mk.tahunAkademik === mahasiswa.tahunAkademik);
+                const krsContainer = document.getElementById('krs-section-container');
+                if (krsContainer) {
+                    krsContainer.innerHTML = KrsSectionHTML(user, krsSubmission, availableCourses);
+                    attachPerwalianListeners(); // Re-attach listeners after re-render
+                }
+            });
+            
+            onSnapshot(doc(db, `/artifacts/${appId}/public/data/perwalian_channels`, channelId), (docSnap) => {
+                const messages = docSnap.exists() ? docSnap.data().messages || [] : [];
+                const chatContainer = document.getElementById('chat-section-container');
+                 if (chatContainer) {
+                    chatContainer.innerHTML = ChatSectionHTML(user, messages, allUsers, otherUserId);
+                    attachPerwalianListeners(); // Re-attach listeners after re-render
                 }
             });
 
             return `
             <div class="container mx-auto p-4 flex flex-col h-full" style="max-height: calc(100vh - 150px);">
                 <div class="flex justify-between items-center mb-4">
-                    <h2 class="text-xl md:text-2xl font-bold text-gray-800">Perwalian dengan ${otherUserName}</h2>
-                    <div class="flex items-center space-x-2">
-                        <button id="back-btn" class="bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg">${user.role === 'dosen' ? 'Pilih Mahasiswa Lain' : 'Keluar'}</button>
+                    <h2 class="text-xl md:text-2xl font-bold text-gray-800">${isDosen ? `Perwalian dengan ${otherUserName}` : 'Dashboard Mahasiswa'}</h2>
+                    <button id="back-btn" class="bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg">${isDosen ? 'Pilih Mahasiswa Lain' : 'Keluar'}</button>
+                </div>
+
+                ${!isDosen ? `
+                <div class="bg-white p-4 rounded-lg shadow-md mb-6">
+                    <h3 class="text-lg font-semibold text-gray-800 mb-2">${mahasiswa.name}</h3>
+                    <div class="grid grid-cols-2 gap-x-4 gap-y-1 text-sm text-gray-600">
+                        <div><strong>NIM:</strong> ${mahasiswa.nim}</div>
+                        <div><strong>Semester:</strong> ${mahasiswa.semester}</div>
+                        <div class="col-span-2"><strong>Tahun Akademik:</strong> ${tahunAkademikNama}</div>
                     </div>
                 </div>
-                <div class="bg-white p-6 rounded-lg shadow-lg flex-grow flex flex-col overflow-hidden">
-                    <form id="send-message-form" data-otheruser="${otherUserId}" class="space-y-4 mb-6 pb-6 border-b">
-                        ${user.role === 'dosen' ? `
-                        <div>
-                            <label class="block text-sm font-medium text-gray-600 mb-1">Jenis Pesan</label>
-                            <select id="message-type-select" class="w-full p-2 border border-gray-300 rounded-md shadow-sm">
-                                <option value="catatan">Catatan Hasil Perwalian</option>
-                                <option value="jadwal">Jadwal Perwalian</option>
-                                <option value="tanggapan">Tanggapan</option>
-                            </select>
-                        </div>` : ''}
-                        <div>
-                            <label class="block text-sm font-medium text-gray-600 mb-1">${user.role === 'mahasiswa' ? 'Tulis Permohonan atau Tanggapan Anda' : 'Tulis Pesan Anda'}</label>
-                            <textarea id="new-message-input" rows="4" class="w-full p-2 border border-gray-300 rounded-md shadow-sm" placeholder="Ketik di sini..."></textarea>
-                        </div>
-                        <button type="submit" class="w-full bg-green-700 hover:bg-green-800 text-white font-bold py-2 px-4 rounded-lg">Kirim</button>
-                    </form>
-                    <div class="flex-grow overflow-y-auto pr-2 space-y-4" id="messages-container">
-                        ${messagesHTML}
+                ` : ''}
+
+                <div class="flex-grow grid grid-cols-1 lg:grid-cols-2 gap-6 overflow-hidden">
+                    <!-- Kolom KRS -->
+                    <div class="bg-white p-6 rounded-lg shadow-lg flex flex-col overflow-y-auto">
+                        <h3 class="text-xl font-semibold text-gray-800 border-b pb-2 mb-4">Kartu Rencana Studi (KRS)</h3>
+                        <div id="krs-section-container"><div class="text-center text-gray-400">Memuat data KRS...</div></div>
+                    </div>
+                    <!-- Kolom Chat -->
+                    <div class="bg-white p-6 rounded-lg shadow-lg flex flex-col overflow-y-auto">
+                         <h3 class="text-xl font-semibold text-gray-800 border-b pb-2 mb-4">Diskusi Perwalian</h3>
+                        <div id="chat-section-container"><div class="text-center text-gray-400">Memuat percakapan...</div></div>
                     </div>
                 </div>
             </div>`;
         }
 
+        function KrsSectionHTML(user, krsSubmission, availableCourses) {
+            const isDosen = user.role === 'dosen';
+
+            if (krsSubmission) {
+                // Tampilan jika KRS sudah diajukan
+                const statusColor = { 'Menunggu': 'bg-yellow-100 text-yellow-800', 'Disetujui': 'bg-green-100 text-green-800', 'Ditolak': 'bg-red-100 text-red-800'}[krsSubmission.status];
+                const submissionDate = new Date(krsSubmission.submittedAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+                const reviewedDate = krsSubmission.reviewedAt ? new Date(krsSubmission.reviewedAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }) : null;
+
+                return `
+                <div>
+                    <div class="flex justify-between items-center mb-1">
+                        <h4 class="text-lg font-semibold">${isDosen ? 'KRS Mahasiswa' : 'KRS Anda'}</h4>
+                        <span class="px-3 py-1 text-sm font-bold rounded-full ${statusColor}">${krsSubmission.status}</span>
+                    </div>
+                    <p class="text-xs text-gray-500 mb-4">Diajukan pada: ${submissionDate}</p>
+                    
+                    <div class="border rounded-lg p-4 space-y-2">
+                        ${krsSubmission.courses.map(c => `
+                            <div class="flex justify-between items-center text-sm">
+                                <span>${c.kode} - ${c.nama}</span>
+                                <span class="font-semibold">${c.sks} SKS</span>
+                            </div>
+                        `).join('')}
+                        <div class="flex justify-between items-center font-bold border-t pt-2 mt-2">
+                            <span>Total SKS</span>
+                            <span>${krsSubmission.totalSks} SKS</span>
+                        </div>
+                    </div>
+
+                    ${reviewedDate ? `<p class="text-xs text-gray-500 mt-2 text-right">Ditinjau pada: ${reviewedDate}</p>` : ''}
+                    ${krsSubmission.dosenNotes ? `<div class="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm"><p class="font-bold mb-1">Catatan dari Dosen:</p><p>${krsSubmission.dosenNotes}</p></div>` : ''}
+
+                    ${isDosen && krsSubmission.status === 'Menunggu' ? `
+                    <div class="mt-6 flex gap-4">
+                        <button id="approve-krs-btn" data-krsid="${krsSubmission.id}" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg">Setujui</button>
+                        <button id="reject-krs-btn" data-krsid="${krsSubmission.id}" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg">Tolak</button>
+                    </div>` : ''}
+                </div>`;
+            } else {
+                // Tampilan jika KRS belum diajukan
+                if (isDosen) {
+                    return `<p class="text-center text-gray-500 py-10">Mahasiswa belum mengajukan KRS untuk tahun akademik ini.</p>`;
+                }
+                return `
+                <form id="krs-form">
+                    <h4 class="text-lg font-semibold mb-2">Pilih Mata Kuliah</h4>
+                    <div class="space-y-2 max-h-64 overflow-y-auto border rounded-lg p-4 mb-4">
+                        ${availableCourses.length > 0 ? availableCourses.map(mk => `
+                        <label class="flex items-center p-2 rounded-md hover:bg-gray-50">
+                            <input type="checkbox" value="${mk.id}" data-sks="${mk.sks}" data-kode="${mk.kode}" data-nama="${mk.nama}" class="h-4 w-4 text-green-600 border-gray-300 rounded focus:ring-green-500">
+                            <span class="ml-3 text-sm flex-grow">${mk.kode} - ${mk.nama}</span>
+                            <span class="text-sm font-semibold">${mk.sks} SKS</span>
+                        </label>
+                        `).join('') : '<p class="text-gray-500">Tidak ada mata kuliah yang tersedia untuk tahun akademik Anda.</p>'}
+                    </div>
+                     <div class="flex justify-between items-center font-bold text-lg mb-4">
+                        <span>Total SKS Dipilih:</span>
+                        <span id="total-sks">0</span>
+                    </div>
+                    <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg">Ajukan KRS</button>
+                </form>
+                `;
+            }
+        }
+
+        function ChatSectionHTML(user, messages, allUsers, otherUserId) {
+             const sortedMessages = [...messages].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+             return `
+                <div class="flex-grow overflow-y-auto pr-2 space-y-4 mb-4" id="messages-container" style="min-height: 200px;">
+                     ${sortedMessages.length > 0 ? sortedMessages.map(msg => {
+                        const isYou = msg.senderId === user.id;
+                        const senderName = isYou ? "Anda" : allUsers[msg.senderId]?.name;
+                        return `
+                        <div class="p-3 rounded-lg text-sm ${isYou ? 'bg-green-100' : 'bg-gray-100'}">
+                            <div class="flex justify-between items-center mb-1">
+                                <p class="font-bold text-gray-800">${senderName}</p>
+                                <span class="text-xs text-gray-500">${new Date(msg.timestamp).toLocaleString('id-ID')}</span>
+                            </div>
+                            <p class="text-gray-700">${msg.content.replace(/\n/g, '<br>')}</p>
+                        </div>`;
+                    }).join('') : '<p class="text-gray-500 text-center py-4">Belum ada percakapan.</p>'}
+                </div>
+                <form id="send-message-form" data-otheruser="${otherUserId}" class="mt-auto">
+                    ${user.role === 'dosen' ? `
+                    <select id="message-type-select" class="w-full p-2 mb-2 border border-gray-300 rounded-md shadow-sm text-sm">
+                        <option value="catatan">Catatan</option>
+                        <option value="jadwal">Jadwal</option>
+                        <option value="tanggapan">Tanggapan</option>
+                    </select>` : ''}
+                    <textarea id="new-message-input" rows="3" class="w-full p-2 border border-gray-300 rounded-md shadow-sm" placeholder="Ketik pesan..."></textarea>
+                    <button type="submit" class="w-full mt-2 bg-green-700 hover:bg-green-800 text-white font-bold py-2 px-4 rounded-lg">Kirim</button>
+                </form>
+             `;
+        }
+
         // --- INISIALISASI APLIKASI ---
         async function initializeAppLogic() {
-            // 1. Otentikasi
             const performSignIn = async () => {
                 if (!auth.currentUser) {
                     try {
@@ -624,8 +840,7 @@
                         else await signInAnonymously(auth);
                     } catch (error) {
                          console.error("Gagal otentikasi:", error);
-                         // Menampilkan pesan galat yang lebih spesifik kepada pengguna
-                         throw new Error("Proses otentikasi gagal. Pastikan metode login 'Anonymous' sudah diaktifkan di Firebase Console Anda pada bagian Authentication -> Sign-in method.");
+                         throw new Error("Proses otentikasi gagal. Pastikan metode login 'Anonymous' sudah diaktifkan di Firebase Console.");
                     }
                 }
             };
@@ -637,12 +852,9 @@
                     if (user && !state.isAuthReady) {
                         state.isAuthReady = true;
 
-                        // 2. Ambil data user, tahun akademik, dan pengaturan
-                        const usersColRef = collection(db, `/artifacts/${appId}/public/data/users`);
-                        onSnapshot(usersColRef, (snapshot) => {
-                            const usersData = {};
-                            const dosen = [];
-                            const mahasiswa = [];
+                        // Listen to all data collections
+                        onSnapshot(collection(db, `/artifacts/${appId}/public/data/users`), (snapshot) => {
+                            const usersData = {}, dosen = [], mahasiswa = [];
                             snapshot.forEach(doc => {
                                 const userData = { id: doc.id, ...doc.data() };
                                 usersData[doc.id] = userData;
@@ -655,37 +867,26 @@
                             state.loadingUsers = false;
                             render();
                         }, (error) => {
-                            console.error("Gagal mengambil data user:", error);
-                             // Menampilkan pesan galat yang lebih spesifik jika ada masalah izin
-                            appContainer.innerHTML = `
-                                ${AppHeaderHTML()}
-                                <main class="flex-grow flex items-center justify-center p-4">
-                                    <div class="w-full max-w-lg bg-white p-8 rounded-lg shadow-xl text-center border-t-4 border-red-500">
-                                        <h1 class="text-2xl font-bold text-red-600 mb-4">Akses Database Ditolak</h1>
-                                        <p class="text-gray-700 mb-2">Aplikasi tidak diizinkan untuk membaca data dari database.</p>
-                                        <p class="text-gray-600">Ini biasanya terjadi karena aturan keamanan (Rules) di Firestore belum diatur dengan benar. Silakan periksa kembali panduan dan pastikan Anda telah mengatur Rules untuk mengizinkan akses baca/tulis.</p>
-                                    </div>
-                                </main>
-                                ${AppFooterHTML()}
-                            `;
-                            state.loadingUsers = false;
+                             appContainer.innerHTML = renderErrorScreen("Akses Database Ditolak", "Aplikasi tidak diizinkan membaca data pengguna. Pastikan aturan keamanan (Rules) di Firestore sudah benar.");
                         });
 
-                        const yearsColRef = collection(db, `/artifacts/${appId}/public/data/academic_years`);
-                        onSnapshot(yearsColRef, (snapshot) => {
+                        onSnapshot(collection(db, `/artifacts/${appId}/public/data/academic_years`), (snapshot) => {
                             const years = [];
                             snapshot.forEach(doc => years.push({ id: doc.id, ...doc.data() }));
                             state.academicYears = years.sort((a,b) => a.id.localeCompare(b.id));
                             render();
                         });
 
-                        const settingsDocRef = doc(db, `/artifacts/${appId}/public/data/settings`, 'app_config');
-                        onSnapshot(settingsDocRef, (docSnap) => {
-                            state.activeAcademicYear = docSnap.exists() ? docSnap.data().activeAcademicYear : null;
-                            state.loadingSettings = false;
+                         onSnapshot(collection(db, `/artifacts/${appId}/public/data/mata_kuliah`), (snapshot) => {
+                            const courses = [];
+                            snapshot.forEach(doc => courses.push({ id: doc.id, ...doc.data() }));
+                            state.mataKuliahList = courses;
+                            state.loadingMataKuliah = false;
                             render();
-                        }, (error) => {
-                            console.error("Gagal mengambil pengaturan:", error);
+                        });
+
+                        onSnapshot(doc(db, `/artifacts/${appId}/public/data/settings`, 'app_config'), (docSnap) => {
+                            state.activeAcademicYear = docSnap.exists() ? docSnap.data().activeAcademicYear : null;
                             state.loadingSettings = false;
                             render();
                         });
@@ -693,18 +894,21 @@
                 });
                 render();
             } catch(e) {
-                 appContainer.innerHTML = `
-                    ${AppHeaderHTML()}
-                    <main class="flex-grow flex items-center justify-center p-4">
-                        <div class="w-full max-w-lg bg-white p-8 rounded-lg shadow-xl text-center border-t-4 border-red-500">
-                            <h1 class="text-2xl font-bold text-red-600 mb-4">Gagal Otentikasi</h1>
-                            <p class="text-gray-700">${e.message}</p>
-                        </div>
-                    </main>
-                    ${AppFooterHTML()}
-                `;
-                console.log("Tidak melanjutkan eksekusi script karena inisialisasi gagal.");
+                 appContainer.innerHTML = renderErrorScreen("Gagal Otentikasi", e.message);
             }
+        }
+
+        function renderErrorScreen(title, message) {
+            return `
+                ${AppHeaderHTML()}
+                <main class="flex-grow flex items-center justify-center p-4">
+                    <div class="w-full max-w-lg bg-white p-8 rounded-lg shadow-xl text-center border-t-4 border-red-500">
+                        <h1 class="text-2xl font-bold text-red-600 mb-4">${title}</h1>
+                        <p class="text-gray-700">${message}</p>
+                    </div>
+                </main>
+                ${AppFooterHTML()}
+            `;
         }
         
         initializeAppLogic();
