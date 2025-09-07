@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sistem Perwalian STAI Al-Mas'udiyah</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         /* Menambahkan sedikit style untuk transisi dan tampilan yang lebih halus */
         body { font-family: 'Inter', sans-serif; }
@@ -26,7 +27,7 @@
         // --- Konfigurasi Firebase ---
         // PENTING: Jika Anda mem-publish aplikasi ini secara mandiri (di luar environment khusus),
         // ganti placeholder di bawah ini dengan konfigurasi Firebase Anda sendiri dari project Firebase Console.
-        const firebaseConfig = typeof __firebase_config !== 'undefined' 
+const firebaseConfig = typeof __firebase_config !== 'undefined' 
             ? JSON.parse(__firebase_config)
             : { 
                 apiKey: "AIzaSyCDx6uqqknaP_ojGvUYGepKbZWnouRyc8c", 
@@ -37,6 +38,7 @@
                 appId: "1:571888446906:web:95d5e6e508698a72eb8183"
                 // Pastikan semua properti konfigurasi Firebase Anda ada di sini
             };
+
         // --- ID Aplikasi ---
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'perwalian-stai-sukabumi';
         
@@ -45,7 +47,6 @@
         // --- Inisialisasi Firebase ---
         let app, auth, db;
         try {
-            // Periksa apakah konfigurasi masih placeholder
             if (firebaseConfig.apiKey.startsWith("GANTI_DENGAN")) {
                 throw new Error("Konfigurasi Firebase masih menggunakan nilai placeholder.");
             }
@@ -54,22 +55,10 @@
             db = getFirestore(app);
         } catch (error) {
             console.error("GAGAL INISIALISASI FIREBASE:", error);
-            // Render pesan galat yang jelas kepada pengguna
-            const header = AppHeaderHTML ? AppHeaderHTML() : '';
-            const footer = AppFooterHTML ? AppFooterHTML() : '';
-            appContainer.innerHTML = `
-                ${header}
-                <main class="flex-grow flex items-center justify-center p-4">
-                    <div class="w-full max-w-lg bg-white p-8 rounded-lg shadow-xl text-center border-t-4 border-red-500">
-                        <h1 class="text-2xl font-bold text-red-600 mb-4">Gagal Memuat Aplikasi</h1>
-                        <p class="text-gray-700 mb-2">Terjadi masalah saat menyambungkan ke database.</p>
-                        <p class="text-gray-600">Pastikan Anda telah mengganti nilai placeholder seperti <code class="bg-red-100 text-red-800 p-1 rounded">'GANTI_DENGAN_API_KEY_ANDA'</code> di dalam file HTML dengan kunci konfigurasi asli dari proyek Firebase Anda.</p>
-                        <p class="mt-4 text-sm text-gray-500">Lihat konsol browser (F12) untuk detail teknis galat.</p>
-                    </div>
-                </main>
-                ${footer}
-            `;
-            // Hentikan eksekusi script lebih lanjut
+            appContainer.innerHTML = renderErrorScreen(
+                "Gagal Memuat Aplikasi",
+                "Pastikan Anda telah mengganti nilai placeholder seperti <code class='bg-red-100 text-red-800 p-1 rounded'>'GANTI_DENGAN_API_KEY_ANDA'</code> di dalam file HTML dengan kunci konfigurasi asli dari proyek Firebase Anda."
+            );
             throw new Error("Inisialisasi Firebase gagal. Script dihentikan.");
         }
 
@@ -82,8 +71,10 @@
             dosenList: [],
             mahasiswaList: [],
             mataKuliahList: [],
+            scheduleList: [],
             loadingUsers: true,
             loadingMataKuliah: true,
+            loadingSchedule: true,
             notification: null,
             modal: { isOpen: false, type: '', data: null },
             selectedStudentId: null,
@@ -92,9 +83,10 @@
             loadingSettings: true,
         };
 
+        let prodiChartInstance = null;
+
         // --- FUNGSI RENDER UTAMA ---
         function render() {
-            // Selalu render header dan footer
             let contentHTML = `
                 ${AppHeaderHTML()}
                 <main class="flex-grow flex flex-col">${renderContent()}</main>
@@ -103,10 +95,11 @@
             `;
             appContainer.innerHTML = contentHTML;
             attachEventListeners();
+            renderCharts();
         }
         
         function renderContent() {
-             if (!state.isAuthReady || state.loadingUsers || state.loadingSettings || state.loadingMataKuliah) {
+             if (!state.isAuthReady || state.loadingUsers || state.loadingSettings || state.loadingMataKuliah || state.loadingSchedule) {
                 return `<div class="text-center p-10 flex-grow flex items-center justify-center">Memuat data...</div>`;
             }
 
@@ -116,7 +109,7 @@
                 return LoginPageHTML(usersForLogin);
             }
             if (state.currentUser.role === 'admin') {
-                return AdminDashboardHTML(state.allUsers, state.dosenList, state.mahasiswaList, state.mataKuliahList);
+                return AdminDashboardHTML();
             }
             if (state.currentUser.role === 'dosen') {
                 if (state.selectedStudentId) {
@@ -129,87 +122,94 @@
             }
             return `<div>Terjadi kesalahan. Role tidak dikenali.</div>`;
         }
+
+        function renderCharts() {
+            const chartCanvas = document.getElementById('prodiChart');
+            if (chartCanvas && state.currentUser?.role === 'dosen') {
+                if (prodiChartInstance) {
+                    prodiChartInstance.destroy();
+                }
+                const mahasiswaBinaan = state.mahasiswaList.filter(m => m.lecturerId === state.currentUser.id);
+                const paiCount = mahasiswaBinaan.filter(m => m.prodi === 'PAI').length;
+                const hesCount = mahasiswaBinaan.filter(m => m.prodi === 'HES').length;
+
+                prodiChartInstance = new Chart(chartCanvas, {
+                    type: 'doughnut',
+                    data: {
+                        labels: ['PAI', 'HES'],
+                        datasets: [{
+                            data: [paiCount, hesCount],
+                            backgroundColor: ['#16A34A', '#DC2626'], // PAI: Hijau, HES: Merah
+                            hoverOffset: 4
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { position: 'right', labels: { boxWidth: 12, font: { size: 10 } } }
+                        }
+                    }
+                });
+            }
+        }
         
         // --- EVENT LISTENERS ATTACHER ---
         function attachEventListeners() {
-            // Notifikasi
             const notifCloseBtn = document.getElementById('notif-close-btn');
-            if (notifCloseBtn) notifCloseBtn.addEventListener('click', () => {
-                state.notification = null;
-                render();
-            });
-
-            // Login
-            const loginForm = document.getElementById('login-form');
-            if (loginForm) loginForm.addEventListener('submit', handleLogin);
+            if (notifCloseBtn) notifCloseBtn.addEventListener('click', () => { state.notification = null; render(); });
             
-            // Logout & Navigasi
+            const loginSearchInput = document.getElementById('login-search-input');
+            if(loginSearchInput) {
+                loginSearchInput.addEventListener('input', handleLoginSearch);
+                handleLoginSearch({ target: { value: '' } }); // Panggil sekali untuk menampilkan semua user
+            }
+
             const logoutBtn = document.getElementById('logout-btn');
             if (logoutBtn) logoutBtn.addEventListener('click', handleLogout);
-
             const backBtn = document.getElementById('back-btn');
             if(backBtn) backBtn.addEventListener('click', () => {
                 if (state.currentUser.role === 'mahasiswa') handleLogout();
-                else {
-                    state.selectedStudentId = null;
-                    render();
-                }
+                else { state.selectedStudentId = null; render(); }
             });
             
-            // Admin Dashboard Buttons
-            const addDosenBtn = document.getElementById('add-dosen-btn');
-            if(addDosenBtn) addDosenBtn.addEventListener('click', () => openModal('addDosen'));
-            document.querySelectorAll('.edit-dosen-btn').forEach(btn => btn.addEventListener('click', (e) => openModal('editDosen', state.allUsers[e.currentTarget.dataset.id])));
-            document.querySelectorAll('.delete-dosen-btn').forEach(btn => btn.addEventListener('click', (e) => handleDeleteUser(e.currentTarget.dataset.id, 'dosen')));
-
-            const addMhsBtn = document.getElementById('add-mhs-btn');
-            if(addMhsBtn) addMhsBtn.addEventListener('click', () => openModal('addMhs'));
-            document.querySelectorAll('.edit-mhs-btn').forEach(btn => btn.addEventListener('click', (e) => openModal('editMhs', state.allUsers[e.currentTarget.dataset.id])));
-            document.querySelectorAll('.delete-mhs-btn').forEach(btn => btn.addEventListener('click', (e) => handleDeleteUser(e.currentTarget.dataset.id, 'mahasiswa')));
-
-            const addMkBtn = document.getElementById('add-mk-btn');
-            if (addMkBtn) addMkBtn.addEventListener('click', () => openModal('addMk'));
-            document.querySelectorAll('.edit-mk-btn').forEach(btn => btn.addEventListener('click', (e) => openModal('editMk', state.mataKuliahList.find(mk => mk.id === e.currentTarget.dataset.id))));
-            document.querySelectorAll('.delete-mk-btn').forEach(btn => btn.addEventListener('click', (e) => handleDeleteCourse(e.currentTarget.dataset.id)));
-
-
-            // Admin: Academic Year Management
-            const addYearForm = document.getElementById('add-year-form');
-            if (addYearForm) addYearForm.addEventListener('submit', handleAddAcademicYear);
-
-            const activeYearSelect = document.getElementById('active-year-select');
-            if (activeYearSelect) activeYearSelect.addEventListener('change', handleSetActiveAcademicYear);
-
-            // Modal
+            if (state.currentUser?.role === 'admin') {
+                document.getElementById('add-dosen-btn')?.addEventListener('click', () => openModal('addDosen'));
+                document.querySelectorAll('.edit-dosen-btn').forEach(btn => btn.addEventListener('click', (e) => openModal('editDosen', state.allUsers[e.currentTarget.dataset.id])));
+                document.querySelectorAll('.delete-dosen-btn').forEach(btn => btn.addEventListener('click', (e) => handleDeleteUser(e.currentTarget.dataset.id, 'dosen')));
+                document.getElementById('add-mhs-btn')?.addEventListener('click', () => openModal('addMhs'));
+                document.querySelectorAll('.edit-mhs-btn').forEach(btn => btn.addEventListener('click', (e) => openModal('editMhs', state.allUsers[e.currentTarget.dataset.id])));
+                document.querySelectorAll('.delete-mhs-btn').forEach(btn => btn.addEventListener('click', (e) => handleDeleteUser(e.currentTarget.dataset.id, 'mahasiswa')));
+                document.getElementById('add-mk-btn')?.addEventListener('click', () => openModal('addMk'));
+                document.querySelectorAll('.edit-mk-btn').forEach(btn => btn.addEventListener('click', (e) => openModal('editMk', state.mataKuliahList.find(mk => mk.id === e.currentTarget.dataset.id))));
+                document.querySelectorAll('.delete-mk-btn').forEach(btn => btn.addEventListener('click', (e) => handleDeleteCourse(e.currentTarget.dataset.id)));
+                document.getElementById('add-schedule-btn')?.addEventListener('click', () => openModal('addSchedule'));
+                document.querySelectorAll('.edit-schedule-btn').forEach(btn => btn.addEventListener('click', (e) => openModal('editSchedule', state.scheduleList.find(s => s.id === e.currentTarget.dataset.id))));
+                document.querySelectorAll('.delete-schedule-btn').forEach(btn => btn.addEventListener('click', (e) => handleDeleteSchedule(e.currentTarget.dataset.id)));
+                document.getElementById('add-year-form')?.addEventListener('submit', handleAddAcademicYear);
+                document.getElementById('active-year-select')?.addEventListener('change', handleSetActiveAcademicYear);
+            }
+            
             const modalCloseBtn = document.getElementById('modal-close-btn');
             if (modalCloseBtn) modalCloseBtn.addEventListener('click', closeModal);
-            
             const userForm = document.getElementById('user-form');
             if(userForm) userForm.addEventListener('submit', handleUserFormSubmit);
-            
-            // Dosen Dashboard
             document.querySelectorAll('.select-student-btn').forEach(btn => {
-                btn.addEventListener('click', (e) => {
-                    state.selectedStudentId = e.currentTarget.dataset.id;
-                    render();
-                });
+                btn.addEventListener('click', (e) => { state.selectedStudentId = e.currentTarget.dataset.id; render(); });
             });
-            
-            // Perwalian Channel & KRS (initial attachment)
             attachPerwalianListeners();
         }
 
         function attachPerwalianListeners() {
             const sendMessageForm = document.getElementById('send-message-form');
             if(sendMessageForm) sendMessageForm.addEventListener('submit', handleSendMessage);
-            
             const krsForm = document.getElementById('krs-form');
-            if (krsForm) krsForm.addEventListener('submit', handleAjukanKrs);
-            if (krsForm) krsForm.addEventListener('change', updateTotalSks);
-
+            if (krsForm) {
+                krsForm.addEventListener('submit', handleAjukanKrs);
+                krsForm.addEventListener('change', updateTotalSks);
+            }
             const approveKrsBtn = document.getElementById('approve-krs-btn');
             if (approveKrsBtn) approveKrsBtn.addEventListener('click', handleApproveKrs);
-
             const rejectKrsBtn = document.getElementById('reject-krs-btn');
             if (rejectKrsBtn) rejectKrsBtn.addEventListener('click', handleRejectKrs);
         }
@@ -219,10 +219,7 @@
             state.notification = notif;
             render();
             if (notif) {
-                setTimeout(() => {
-                    state.notification = null;
-                    render();
-                }, 3000);
+                setTimeout(() => { state.notification = null; render(); }, 3000);
             }
         }
         
@@ -236,14 +233,45 @@
             render();
         }
         
-        function handleLogin(e) {
-            e.preventDefault();
-            const selectedUserId = document.getElementById('login-select').value;
+        function handleLoginClick(e) {
+            const selectedUserId = e.currentTarget.dataset.userid;
             if (selectedUserId) {
                 const usersForLogin = { ...state.allUsers, 'admin_001': { id: 'admin_001', name: 'Administrator', role: 'admin' } };
                 state.currentUser = usersForLogin[selectedUserId];
                 render();
             }
+        }
+
+        function handleLoginSearch(e) {
+            const searchTerm = e.target.value.toLowerCase();
+            const resultsContainer = document.getElementById('login-results-container');
+            if (!resultsContainer) return;
+
+            const usersForLogin = { ...state.allUsers, 'admin_001': { id: 'admin_001', name: 'Administrator', role: 'admin' } };
+            const userList = Object.values(usersForLogin);
+
+            const filteredUsers = userList.filter(user => user.name.toLowerCase().includes(searchTerm));
+
+            if (filteredUsers.length > 0) {
+                resultsContainer.innerHTML = filteredUsers
+                    .sort((a,b) => a.name.localeCompare(b.name))
+                    .map(user => {
+                        const roleLabel = { admin: 'Admin', dosen: 'Dosen', mahasiswa: 'Mahasiswa'}[user.role];
+                        return `
+                            <button data-userid="${user.id}" class="login-user-btn w-full text-left p-3 hover:bg-gray-100 border-b last:border-b-0 transition-colors duration-150">
+                                <p class="font-semibold text-gray-800">${user.name}</p>
+                                <p class="text-sm text-gray-500">${roleLabel}</p>
+                            </button>
+                        `;
+                    }).join('');
+            } else {
+                resultsContainer.innerHTML = `<p class="p-4 text-center text-gray-500">Tidak ada akun yang cocok.</p>`;
+            }
+
+            // Attach click listeners to the new buttons
+            document.querySelectorAll('.login-user-btn').forEach(btn => {
+                btn.addEventListener('click', handleLoginClick);
+            });
         }
         
         function handleLogout() {
@@ -291,34 +319,27 @@
             const id = form.dataset.id;
             
             try {
-                if (type === 'addDosen' || type === 'editDosen') {
-                    const payload = { ...data, role: 'dosen' };
-                    if (type === 'addDosen') {
-                        await addDoc(collection(db, `/artifacts/${appId}/public/data/users`), payload);
-                        setNotification({ type: 'success', message: 'Dosen berhasil ditambahkan!' });
-                    } else {
-                        await updateDoc(doc(db, `/artifacts/${appId}/public/data/users`, id), payload);
-                        setNotification({ type: 'success', message: 'Data dosen berhasil diperbarui!' });
-                    }
-                } else if (type === 'addMhs' || type === 'editMhs') {
-                    const payload = { ...data, role: 'mahasiswa' };
-                    if (type === 'addMhs') {
-                        await addDoc(collection(db, `/artifacts/${appId}/public/data/users`), payload);
-                        setNotification({ type: 'success', message: 'Mahasiswa berhasil ditambahkan!' });
-                    } else {
-                        await updateDoc(doc(db, `/artifacts/${appId}/public/data/users`, id), payload);
-                        setNotification({ type: 'success', message: 'Data mahasiswa berhasil diperbarui!' });
-                    }
-                } else if (type === 'addMk' || type === 'editMk') {
-                    const payload = { ...data, sks: Number(data.sks) }; // Pastikan SKS adalah angka
-                     if (type === 'addMk') {
-                        await addDoc(collection(db, `/artifacts/${appId}/public/data/mata_kuliah`), payload);
-                        setNotification({ type: 'success', message: 'Mata kuliah berhasil ditambahkan!' });
-                    } else {
-                        await updateDoc(doc(db, `/artifacts/${appId}/public/data/mata_kuliah`, id), payload);
-                        setNotification({ type: 'success', message: 'Data mata kuliah berhasil diperbarui!' });
-                    }
+                let collectionName = '', payload = {}, successMessage = '';
+                if (type.includes('Dosen')) {
+                    collectionName = 'users'; payload = {...data, role: 'dosen'};
+                    successMessage = type === 'addDosen' ? 'Dosen berhasil ditambahkan!' : 'Data dosen berhasil diperbarui!';
+                } else if (type.includes('Mhs')) {
+                    collectionName = 'users'; payload = {...data, role: 'mahasiswa'};
+                    successMessage = type === 'addMhs' ? 'Mahasiswa berhasil ditambahkan!' : 'Data mahasiswa berhasil diperbarui!';
+                } else if (type.includes('Mk')) {
+                    collectionName = 'mata_kuliah'; payload = {...data, sks: Number(data.sks)};
+                    successMessage = type === 'addMk' ? 'Mata kuliah berhasil ditambahkan!' : 'Data mata kuliah berhasil diperbarui!';
+                } else if (type.includes('Schedule')) {
+                    collectionName = 'jadwal_kuliah'; payload = data;
+                    successMessage = type === 'addSchedule' ? 'Jadwal berhasil ditambahkan!' : 'Jadwal berhasil diperbarui!';
                 }
+
+                if(type.startsWith('add')) {
+                    await addDoc(collection(db, `/artifacts/${appId}/public/data/${collectionName}`), payload);
+                } else {
+                    await updateDoc(doc(db, `/artifacts/${appId}/public/data/${collectionName}`, id), payload);
+                }
+                setNotification({ type: 'success', message: successMessage });
                 closeModal();
             } catch (error) {
                 console.error("Error submitting form:", error);
@@ -326,15 +347,13 @@
             }
         }
 
+
         async function handleDeleteUser(userId, role) {
             if (confirm(`Apakah Anda yakin ingin menghapus ${role} ini?`)) {
                 try {
                     await deleteDoc(doc(db, `/artifacts/${appId}/public/data/users`, userId));
                     setNotification({ type: 'success', message: `Data ${role} berhasil dihapus.` });
-                } catch (error) {
-                    console.error(`Error deleting ${role}:`, error);
-                    setNotification({ type: 'error', message: `Gagal menghapus data ${role}.` });
-                }
+                } catch (error) { setNotification({ type: 'error', message: `Gagal menghapus data ${role}.` }); }
             }
         }
 
@@ -343,10 +362,16 @@
                 try {
                     await deleteDoc(doc(db, `/artifacts/${appId}/public/data/mata_kuliah`, courseId));
                     setNotification({ type: 'success', message: `Mata kuliah berhasil dihapus.` });
-                } catch (error) {
-                    console.error(`Error deleting course:`, error);
-                    setNotification({ type: 'error', message: `Gagal menghapus mata kuliah.` });
-                }
+                } catch (error) { setNotification({ type: 'error', message: `Gagal menghapus mata kuliah.` }); }
+            }
+        }
+
+        async function handleDeleteSchedule(scheduleId) {
+             if (confirm(`Apakah Anda yakin ingin menghapus jadwal ini?`)) {
+                try {
+                    await deleteDoc(doc(db, `/artifacts/${appId}/public/data/jadwal_kuliah`, scheduleId));
+                    setNotification({ type: 'success', message: `Jadwal berhasil dihapus.` });
+                } catch (error) { setNotification({ type: 'error', message: `Gagal menghapus jadwal.` }); }
             }
         }
 
@@ -358,13 +383,9 @@
             const otherUserId = e.target.dataset.otheruser;
 
             if (newMessage.trim() === '') return;
-
             const messagePayload = {
-                id: `${state.currentUser.id}_${Date.now()}`,
-                senderId: state.currentUser.id,
-                type: messageType,
-                content: newMessage,
-                timestamp: new Date().toISOString(),
+                id: `${state.currentUser.id}_${Date.now()}`, senderId: state.currentUser.id,
+                type: messageType, content: newMessage, timestamp: new Date().toISOString(),
             };
             const channelId = state.currentUser.role === 'dosen' ? `${state.currentUser.id}_${otherUserId}` : `${otherUserId}_${state.currentUser.id}`;
             const docRef = doc(db, `/artifacts/${appId}/public/data/perwalian_channels`, channelId);
@@ -377,17 +398,13 @@
                 }
                 setNotification({ type: 'success', message: 'Pesan berhasil dikirim!' });
                 newMessageInput.value = '';
-            } catch (error) {
-                console.error("Error sending message:", error);
-                setNotification({ type: 'error', message: 'Gagal mengirim pesan.' });
-            }
+            } catch (error) { setNotification({ type: 'error', message: 'Gagal mengirim pesan.' }); }
         }
 
         function updateTotalSks() {
             const form = document.getElementById('krs-form');
             const totalSksEl = document.getElementById('total-sks');
             if (!form || !totalSksEl) return;
-
             let total = 0;
             form.querySelectorAll('input[type="checkbox"]:checked').forEach(checkbox => {
                 total += Number(checkbox.dataset.sks);
@@ -400,519 +417,202 @@
             const form = e.target;
             const selectedCourses = [];
             form.querySelectorAll('input[type="checkbox"]:checked').forEach(checkbox => {
-                selectedCourses.push({
-                    id: checkbox.value,
-                    kode: checkbox.dataset.kode,
-                    nama: checkbox.dataset.nama,
-                    sks: Number(checkbox.dataset.sks)
-                });
+                selectedCourses.push({ id: checkbox.value, kode: checkbox.dataset.kode, nama: checkbox.dataset.nama, sks: Number(checkbox.dataset.sks) });
             });
-
             if (selectedCourses.length === 0) {
-                setNotification({ type: 'error', message: 'Pilih minimal satu mata kuliah.' });
-                return;
+                setNotification({ type: 'error', message: 'Pilih minimal satu mata kuliah.' }); return;
             }
-
             const totalSks = selectedCourses.reduce((sum, course) => sum + course.sks, 0);
             const krsSubmission = {
-                mahasiswaId: state.currentUser.id,
-                dosenId: state.currentUser.lecturerId,
-                tahunAkademik: state.currentUser.tahunAkademik,
-                status: 'Menunggu',
-                courses: selectedCourses,
-                totalSks: totalSks,
-                submittedAt: new Date().toISOString(),
-                reviewedAt: null,
-                dosenNotes: ''
+                mahasiswaId: state.currentUser.id, dosenId: state.currentUser.lecturerId,
+                tahunAkademik: state.currentUser.tahunAkademik, status: 'Menunggu',
+                courses: selectedCourses, totalSks: totalSks, submittedAt: new Date().toISOString(),
+                reviewedAt: null, dosenNotes: ''
             };
-
             const krsId = `${state.currentUser.tahunAkademik}_${state.currentUser.id}`;
             try {
                 await setDoc(doc(db, `/artifacts/${appId}/public/data/krs_submissions`, krsId), krsSubmission);
                 setNotification({ type: 'success', message: 'KRS berhasil diajukan!' });
-            } catch (error) {
-                console.error("Error submitting KRS:", error);
-                setNotification({ type: 'error', message: 'Gagal mengajukan KRS.' });
-            }
+            } catch (error) { setNotification({ type: 'error', message: 'Gagal mengajukan KRS.' }); }
         }
 
         async function handleApproveKrs(e) {
             const krsId = e.currentTarget.dataset.krsid;
             try {
-                await updateDoc(doc(db, `/artifacts/${appId}/public/data/krs_submissions`, krsId), {
-                    status: 'Disetujui',
-                    reviewedAt: new Date().toISOString()
-                });
+                await updateDoc(doc(db, `/artifacts/${appId}/public/data/krs_submissions`, krsId), { status: 'Disetujui', reviewedAt: new Date().toISOString() });
                 setNotification({ type: 'success', message: 'KRS telah disetujui.' });
-            } catch (error) {
-                console.error("Error approving KRS:", error);
-                setNotification({ type: 'error', message: 'Gagal menyetujui KRS.' });
-            }
+            } catch (error) { setNotification({ type: 'error', message: 'Gagal menyetujui KRS.' }); }
         }
         
         async function handleRejectKrs(e) {
             const krsId = e.currentTarget.dataset.krsid;
             const notes = prompt("Silakan masukkan alasan penolakan (opsional):");
             try {
-                await updateDoc(doc(db, `/artifacts/${appId}/public/data/krs_submissions`, krsId), {
-                    status: 'Ditolak',
-                    dosenNotes: notes || '',
-                    reviewedAt: new Date().toISOString()
-                });
+                await updateDoc(doc(db, `/artifacts/${appId}/public/data/krs_submissions`, krsId), { status: 'Ditolak', dosenNotes: notes || '', reviewedAt: new Date().toISOString() });
                 setNotification({ type: 'success', message: 'KRS telah ditolak.' });
-            } catch (error) {
-                console.error("Error rejecting KRS:", error);
-                setNotification({ type: 'error', message: 'Gagal menolak KRS.' });
-            }
+            } catch (error) { setNotification({ type: 'error', message: 'Gagal menolak KRS.' }); }
         }
 
-        
-        // --- HTML TEMPLATE FUNCTIONS (Komponen) ---
-        function AppHeaderHTML() {
-            return `
-            <header class="bg-green-800 text-white p-4 shadow-md w-full">
-                <div class="container mx-auto flex items-center justify-between">
-                    <div class="flex items-center space-x-3">
-                        <img src="https://iili.io/KdXnlX2.png" alt="Logo STAI Al-Mas'udiyah" class="h-12 w-12 object-contain"/>
-                        <h1 class="text-xl md:text-2xl font-bold">SISTEM PERWALIAN</h1>
-                    </div>
-                    <span class="text-sm hidden md:block">STAI Al-Mas'udiyah Sukabumi</span>
-                </div>
-            </header>`;
-        }
-        
-        function AppFooterHTML() {
-            return `
-            <footer class="bg-gray-800 text-white text-xs text-center p-4 mt-auto w-full">
-                <p>Sekretariat STAI Al-Mas'udiyah Sukabumi: Jl. Sagaranten Km. 26 Kp. Buni Ayu Desa Kertaangsana Kec. Nyalindung Sukabumi</p>
-                <p class="mt-1">Copyright &copy; 2025</p>
-            </footer>`;
-        }
-
+        // --- HTML TEMPLATE FUNCTIONS ---
+        function AppHeaderHTML() { return `<header class="bg-green-800 text-white p-4 shadow-md w-full"><div class="container mx-auto flex items-center justify-between"><div class="flex items-center space-x-3"><img src="https://iili.io/KdXnlX2.png" alt="Logo STAI Al-Mas'udiyah" class="h-12 w-12 object-contain"/><h1 class="text-xl md:text-2xl font-bold">SISTEM PERWALIAN</h1></div><span class="text-sm hidden md:block">STAI Al-Mas'udiyah Sukabumi</span></div></header>`; }
+        function AppFooterHTML() { return `<footer class="bg-gray-800 text-white text-xs text-center p-4 mt-auto w-full"><p>Sekretariat STAI Al-Mas'udiyah Sukabumi: Jl. Sagaranten Km. 26 Kp. Buni Ayu Desa Kertaangsana Kec. Nyalindung Sukabumi</p><p class="mt-1">Copyright &copy; 2025</p></footer>`; }
         function NotificationComponentHTML(notification) {
             if (!notification) return '';
             const typeStyle = notification.type === 'error' ? 'bg-red-600' : 'bg-green-600';
-            return `
-            <div class="notification fixed top-5 right-5 text-white p-3 rounded-lg shadow-lg z-50 flex items-center ${typeStyle}">
-                <span class="mr-4">${notification.message}</span>
-                <button id="notif-close-btn" class="font-bold text-lg">&times;</button>
-            </div>`;
+            return `<div class="notification fixed top-5 right-5 text-white p-3 rounded-lg shadow-lg z-50 flex items-center ${typeStyle}"><span class="mr-4">${notification.message}</span><button id="notif-close-btn" class="font-bold text-lg">&times;</button></div>`;
         }
-
         function LoginPageHTML(users) {
-            const userList = Object.values(users);
-            const dosenList = userList.filter(u => u.role === 'dosen').sort((a,b) => a.name.localeCompare(b.name));
-            const mahasiswaList = userList.filter(u => u.role === 'mahasiswa').sort((a,b) => a.name.localeCompare(b.name));
-
             return `
             <div class="flex-grow flex items-center justify-center p-4">
                 <div class="w-full max-w-md bg-white p-8 rounded-lg shadow-xl text-center">
                     <img src="https://iili.io/KdXnlX2.png" alt="Logo" class="h-24 w-24 mx-auto mb-4"/>
                     <h2 class="text-2xl font-bold text-gray-800 mb-2">Login Sistem Perwalian</h2>
-                    <p class="text-gray-600 mb-6">Silakan pilih akun Anda untuk masuk.</p>
-                    <form id="login-form" class="space-y-4">
-                        <select id="login-select" class="w-full p-3 border border-gray-300 rounded-md shadow-sm focus:ring-green-500 focus:border-green-500">
-                            <option value="" disabled selected>-- Pilih Akun --</option>
-                            <optgroup label="Administrator"><option value="admin_001">Administrator</option></optgroup>
-                            <optgroup label="Dosen Wali">${dosenList.map(user => `<option value="${user.id}">${user.name}</option>`).join('')}</optgroup>
-                            <optgroup label="Mahasiswa">${mahasiswaList.map(user => `<option value="${user.id}">${user.name}</option>`).join('')}</optgroup>
-                        </select>
-                        <button type="submit" class="w-full bg-green-700 hover:bg-green-800 text-white font-bold py-3 px-4 rounded-lg transition duration-300 disabled:bg-gray-400">Masuk</button>
-                    </form>
+                    <p class="text-gray-600 mb-6">Ketik nama Anda untuk mencari dan memilih akun.</p>
+                    <div id="login-container">
+                        <input type="text" id="login-search-input" class="w-full p-3 border border-gray-300 rounded-md shadow-sm focus:ring-green-500 focus:border-green-500" placeholder="Cari nama dosen atau mahasiswa...">
+                        <div id="login-results-container" class="mt-2 border rounded-lg max-h-60 overflow-y-auto bg-white">
+                            <!-- Hasil pencarian akan ditampilkan di sini -->
+                        </div>
+                    </div>
                 </div>
             </div>`;
         }
-        
-        function AdminDashboardHTML(users, dosen, mahasiswa, mataKuliah) {
-            const sortedDosen = [...dosen].sort((a, b) => a.name.localeCompare(b.name));
-            const sortedMahasiswa = [...mahasiswa].sort((a, b) => a.name.localeCompare(b.name));
-            const sortedMataKuliah = [...mataKuliah].sort((a, b) => a.nama.localeCompare(b.nama));
-            
-            const filteredDosen = state.activeAcademicYear ? sortedDosen.filter(d => d.tahunAkademik === state.activeAcademicYear) : sortedDosen;
-            const filteredMahasiswa = state.activeAcademicYear ? sortedMahasiswa.filter(m => m.tahunAkademik === state.activeAcademicYear) : sortedMahasiswa;
-            const filteredMataKuliah = state.activeAcademicYear ? sortedMataKuliah.filter(mk => mk.tahunAkademik === state.activeAcademicYear) : sortedMataKuliah;
-
-            return `
-            <div class="container mx-auto p-4 space-y-6">
-                <div class="flex justify-between items-center">
-                    <h2 class="text-2xl font-bold text-gray-800">Manajemen Data</h2>
-                    <button id="logout-btn" class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg">Keluar</button>
-                </div>
-
-                <div class="bg-white p-6 rounded-lg shadow-lg">
-                    <h3 class="text-xl font-semibold text-gray-700 mb-4">Manajemen Tahun Akademik</h3>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div>
-                            <label for="active-year-select" class="block text-sm font-medium text-gray-700">Tampilkan Data Untuk Tahun Akademik</label>
-                            <select id="active-year-select" class="mt-1 block w-full p-2 border border-gray-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500">
-                                <option value="">-- Tampilkan Semua --</option>
-                                ${state.academicYears.map(year => `<option value="${year.id}" ${state.activeAcademicYear === year.id ? 'selected' : ''}>${year.name}</option>`).join('')}
-                            </select>
-                        </div>
-                        <div>
-                            <label for="new-year-input" class="block text-sm font-medium text-gray-700">Tambah Tahun Akademik Baru</label>
-                            <form id="add-year-form" class="mt-1 flex shadow-sm">
-                                <input type="text" id="new-year-input" placeholder="Contoh: 2025/2026" class="w-full p-2 border-gray-300 border rounded-l-md focus:ring-green-500 focus:border-green-500" required>
-                                <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-r-md">Tambah</button>
-                            </form>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Manajemen Mata Kuliah -->
-                <div class="bg-white p-6 rounded-lg shadow-lg">
-                    <div class="flex justify-between items-center mb-4">
-                        <h3 class="text-xl font-semibold text-gray-700">Data Mata Kuliah</h3>
-                        <button id="add-mk-btn" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg">Tambah MK</button>
-                    </div>
-                    <div class="overflow-x-auto">
-                        <table class="w-full text-sm text-left text-gray-500">
-                            <thead class="text-xs text-gray-700 uppercase bg-gray-50"><tr><th class="px-6 py-3">Kode</th><th class="px-6 py-3">Nama Mata Kuliah</th><th class="px-6 py-3">SKS</th><th class="px-6 py-3">Prasyarat</th><th class="px-6 py-3">T.A.</th><th class="px-6 py-3">Aksi</th></tr></thead>
-                            <tbody>${filteredMataKuliah.map(mk => `<tr class="bg-white border-b"><td class="px-6 py-4 font-medium text-gray-900">${mk.kode}</td><td class="px-6 py-4">${mk.nama}</td><td class="px-6 py-4">${mk.sks}</td><td class="px-6 py-4">${mk.prasyarat || '-'}</td><td class="px-6 py-4">${state.academicYears.find(y=>y.id===mk.tahunAkademik)?.name}</td><td class="px-6 py-4 space-x-2"><button data-id="${mk.id}" class="edit-mk-btn font-medium text-blue-600 hover:underline">Edit</button><button data-id="${mk.id}" class="delete-mk-btn font-medium text-red-600 hover:underline">Hapus</button></td></tr>`).join('')}</tbody>
-                        </table>
-                    </div>
-                </div>
-
-                <div class="bg-white p-6 rounded-lg shadow-lg">
-                    <div class="flex justify-between items-center mb-4">
-                        <h3 class="text-xl font-semibold text-gray-700">Data Dosen Wali</h3>
-                        <button id="add-dosen-btn" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg">Tambah Dosen</button>
-                    </div>
-                    <div class="overflow-x-auto">
-                        <table class="w-full text-sm text-left text-gray-500">
-                            <thead class="text-xs text-gray-700 uppercase bg-gray-50"><tr><th class="px-6 py-3">Nama</th><th class="px-6 py-3">NIDN</th><th class="px-6 py-3">Jabatan</th><th class="px-6 py-3">T.A.</th><th class="px-6 py-3">Aksi</th></tr></thead>
-                            <tbody>${filteredDosen.map(d => `<tr class="bg-white border-b"><td class="px-6 py-4 font-medium text-gray-900">${d.name}</td><td class="px-6 py-4">${d.nidn}</td><td class="px-6 py-4">${d.jabatan}</td><td class="px-6 py-4">${state.academicYears.find(y=>y.id===d.tahunAkademik)?.name}</td><td class="px-6 py-4 space-x-2"><button data-id="${d.id}" class="edit-dosen-btn font-medium text-blue-600 hover:underline">Edit</button><button data-id="${d.id}" class="delete-dosen-btn font-medium text-red-600 hover:underline">Hapus</button></td></tr>`).join('')}</tbody>
-                        </table>
-                    </div>
-                </div>
-
-                <div class="bg-white p-6 rounded-lg shadow-lg">
-                    <div class="flex justify-between items-center mb-4">
-                        <h3 class="text-xl font-semibold text-gray-700">Data Mahasiswa</h3>
-                        <button id="add-mhs-btn" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg">Tambah Mahasiswa</button>
-                    </div>
-                    <div class="overflow-x-auto">
-                        <table class="w-full text-sm text-left text-gray-500">
-                            <thead class="text-xs text-gray-700 uppercase bg-gray-50"><tr><th class="px-6 py-3">Nama</th><th class="px-6 py-3">NIM</th><th class="px-6 py-3">Prodi</th><th class="px-6 py-3">Semester</th><th class="px-6 py-3">T.A.</th><th class="px-6 py-3">Dosen Wali</th><th class="px-6 py-3">Aksi</th></tr></thead>
-                            <tbody>${filteredMahasiswa.map(m => `<tr class="bg-white border-b"><td class="px-6 py-4 font-medium text-gray-900">${m.name}</td><td class="px-6 py-4">${m.nim}</td><td class="px-6 py-4">${m.prodi}</td><td class="px-6 py-4">${m.semester}</td><td class="px-6 py-4">${state.academicYears.find(y=>y.id===m.tahunAkademik)?.name}</td><td class="px-6 py-4">${users[m.lecturerId]?.name || 'N/A'}</td><td class="px-6 py-4 space-x-2"><button data-id="${m.id}" class="edit-mhs-btn font-medium text-blue-600 hover:underline">Edit</button><button data-id="${m.id}" class="delete-mhs-btn font-medium text-red-600 hover:underline">Hapus</button></td></tr>`).join('')}</tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-            ${state.modal.isOpen ? ModalHTML(state.modal.type, state.modal.data, dosen) : ''}
-            `;
+        function AdminDashboardHTML() {
+            const { allUsers, dosenList, mahasiswaList, mataKuliahList, scheduleList, activeAcademicYear, academicYears } = state;
+            const filteredDosen = activeAcademicYear ? dosenList.filter(d => d.tahunAkademik === activeAcademicYear) : dosenList;
+            const filteredMahasiswa = activeAcademicYear ? mahasiswaList.filter(m => m.tahunAkademik === activeAcademicYear) : mahasiswaList;
+            const filteredMataKuliah = activeAcademicYear ? mataKuliahList.filter(mk => mk.tahunAkademik === activeAcademicYear) : mataKuliahList;
+            const filteredSchedule = activeAcademicYear ? scheduleList.filter(s => s.tahunAkademik === activeAcademicYear) : scheduleList;
+            return `<div class="container mx-auto p-4 space-y-6">
+                <div class="flex justify-between items-center"><h2 class="text-2xl font-bold text-gray-800">Manajemen Data</h2><button id="logout-btn" class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg">Keluar</button></div>
+                <div class="bg-white p-6 rounded-lg shadow-lg"><h3 class="text-xl font-semibold text-gray-700 mb-4">Manajemen Tahun Akademik</h3><div class="grid grid-cols-1 md:grid-cols-2 gap-6"><div><label for="active-year-select" class="block text-sm font-medium text-gray-700">Tampilkan Data Untuk Tahun Akademik</label><select id="active-year-select" class="mt-1 block w-full p-2 border border-gray-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500"><option value="">-- Tampilkan Semua --</option>${academicYears.map(year => `<option value="${year.id}" ${activeAcademicYear === year.id ? 'selected' : ''}>${year.name}</option>`).join('')}</select></div><div><label for="new-year-input" class="block text-sm font-medium text-gray-700">Tambah Tahun Akademik Baru</label><form id="add-year-form" class="mt-1 flex shadow-sm"><input type="text" id="new-year-input" placeholder="Contoh: 2025/2026" class="w-full p-2 border-gray-300 border rounded-l-md focus:ring-green-500 focus:border-green-500" required><button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-r-md">Tambah</button></form></div></div></div>
+                <div class="bg-white p-6 rounded-lg shadow-lg"><div class="flex justify-between items-center mb-4"><h3 class="text-xl font-semibold text-gray-700">Manajemen Jadwal Kuliah</h3><button id="add-schedule-btn" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg">Tambah Jadwal</button></div><div class="overflow-x-auto"><table class="w-full text-sm text-left text-gray-500"><thead class="text-xs text-gray-700 uppercase bg-gray-50"><tr><th class="px-6 py-3">Mata Kuliah</th><th class="px-6 py-3">Dosen</th><th class="px-6 py-3">Hari & Waktu</th><th class="px-6 py-3">Ruangan</th><th class="px-6 py-3">T.A.</th><th class="px-6 py-3">Aksi</th></tr></thead><tbody>${filteredSchedule.map(s => `<tr class="bg-white border-b"><td class="px-6 py-4 font-medium text-gray-900">${mataKuliahList.find(mk => mk.id === s.mataKuliahId)?.nama || ''}</td><td class="px-6 py-4">${dosenList.find(d => d.id === s.dosenId)?.name || ''}</td><td class="px-6 py-4">${s.hari}, ${s.jamMulai}-${s.jamSelesai}</td><td class="px-6 py-4">${s.ruangan}</td><td class="px-6 py-4">${academicYears.find(y => y.id === s.tahunAkademik)?.name}</td><td class="px-6 py-4 space-x-2"><button data-id="${s.id}" class="edit-schedule-btn font-medium text-blue-600 hover:underline">Edit</button><button data-id="${s.id}" class="delete-schedule-btn font-medium text-red-600 hover:underline">Hapus</button></td></tr>`).join('')}</tbody></table></div></div>
+                <div class="bg-white p-6 rounded-lg shadow-lg"><div class="flex justify-between items-center mb-4"><h3 class="text-xl font-semibold text-gray-700">Data Mata Kuliah</h3><button id="add-mk-btn" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg">Tambah MK</button></div><div class="overflow-x-auto"><table class="w-full text-sm text-left text-gray-500"><thead class="text-xs text-gray-700 uppercase bg-gray-50"><tr><th class="px-6 py-3">Kode</th><th class="px-6 py-3">Nama Mata Kuliah</th><th class="px-6 py-3">SKS</th><th class="px-6 py-3">Prasyarat</th><th class="px-6 py-3">T.A.</th><th class="px-6 py-3">Aksi</th></tr></thead><tbody>${filteredMataKuliah.map(mk => `<tr class="bg-white border-b"><td class="px-6 py-4 font-medium text-gray-900">${mk.kode}</td><td class="px-6 py-4">${mk.nama}</td><td class="px-6 py-4">${mk.sks}</td><td class="px-6 py-4">${mk.prasyarat || '-'}</td><td class="px-6 py-4">${academicYears.find(y=>y.id===mk.tahunAkademik)?.name}</td><td class="px-6 py-4 space-x-2"><button data-id="${mk.id}" class="edit-mk-btn font-medium text-blue-600 hover:underline">Edit</button><button data-id="${mk.id}" class="delete-mk-btn font-medium text-red-600 hover:underline">Hapus</button></td></tr>`).join('')}</tbody></table></div></div>
+                <div class="bg-white p-6 rounded-lg shadow-lg"><div class="flex justify-between items-center mb-4"><h3 class="text-xl font-semibold text-gray-700">Data Dosen Wali</h3><button id="add-dosen-btn" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg">Tambah Dosen</button></div><div class="overflow-x-auto"><table class="w-full text-sm text-left text-gray-500"><thead class="text-xs text-gray-700 uppercase bg-gray-50"><tr><th class="px-6 py-3">Nama</th><th class="px-6 py-3">NIDN</th><th class="px-6 py-3">Jabatan</th><th class="px-6 py-3">T.A.</th><th class="px-6 py-3">Aksi</th></tr></thead><tbody>${filteredDosen.map(d => `<tr class="bg-white border-b"><td class="px-6 py-4 font-medium text-gray-900">${d.name}</td><td class="px-6 py-4">${d.nidn}</td><td class="px-6 py-4">${d.jabatan}</td><td class="px-6 py-4">${academicYears.find(y=>y.id===d.tahunAkademik)?.name}</td><td class="px-6 py-4 space-x-2"><button data-id="${d.id}" class="edit-dosen-btn font-medium text-blue-600 hover:underline">Edit</button><button data-id="${d.id}" class="delete-dosen-btn font-medium text-red-600 hover:underline">Hapus</button></td></tr>`).join('')}</tbody></table></div></div>
+                <div class="bg-white p-6 rounded-lg shadow-lg"><div class="flex justify-between items-center mb-4"><h3 class="text-xl font-semibold text-gray-700">Data Mahasiswa</h3><button id="add-mhs-btn" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg">Tambah Mahasiswa</button></div><div class="overflow-x-auto"><table class="w-full text-sm text-left text-gray-500"><thead class="text-xs text-gray-700 uppercase bg-gray-50"><tr><th class="px-6 py-3">Nama</th><th class="px-6 py-3">NIM</th><th class="px-6 py-3">Prodi</th><th class="px-6 py-3">Semester</th><th class="px-6 py-3">T.A.</th><th class="px-6 py-3">Dosen Wali</th><th class="px-6 py-3">Aksi</th></tr></thead><tbody>${filteredMahasiswa.map(m => `<tr class="bg-white border-b"><td class="px-6 py-4 font-medium text-gray-900">${m.name}</td><td class="px-6 py-4">${m.nim}</td><td class="px-6 py-4">${m.prodi}</td><td class="px-6 py-4">${m.semester}</td><td class="px-6 py-4">${academicYears.find(y=>y.id===m.tahunAkademik)?.name}</td><td class="px-6 py-4">${allUsers[m.lecturerId]?.name || 'N/A'}</td><td class="px-6 py-4 space-x-2"><button data-id="${m.id}" class="edit-mhs-btn font-medium text-blue-600 hover:underline">Edit</button><button data-id="${m.id}" class="delete-mhs-btn font-medium text-red-600 hover:underline">Hapus</button></td></tr>`).join('')}</tbody></table></div></div>
+            </div> ${state.modal.isOpen ? ModalHTML() : ''}`;
         }
-
         function DosenDashboardHTML(user, mahasiswa) {
             const mahasiswaBinaan = mahasiswa.filter(m => m.lecturerId === user.id);
-             return `
-            <div class="container mx-auto p-4">
-                <div class="flex justify-between items-center mb-6">
-                    <h2 class="text-2xl font-bold text-gray-800">Selamat Datang, ${user.name}</h2>
-                    <button id="logout-btn" class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg">Keluar</button>
-                </div>
-                <div class="bg-white p-6 rounded-lg shadow-lg">
-                    <h3 class="text-xl font-semibold mb-4 text-gray-700 border-b pb-2">Pilih Mahasiswa Binaan</h3>
-                    <div class="space-y-3">
-                        ${mahasiswaBinaan.length > 0 ? mahasiswaBinaan.map(student => `
-                            <button data-id="${student.id}" class="select-student-btn w-full text-left p-4 bg-gray-50 hover:bg-green-100 rounded-lg border border-gray-200 transition duration-300">
-                                ${student.name} <span class="text-sm text-gray-500">(${student.nim})</span>
-                            </button>
-                        `).join('') : '<p class="text-gray-500">Belum ada mahasiswa binaan.</p>'}
-                    </div>
-                </div>
-            </div>`;
+            const paiCount = mahasiswaBinaan.filter(m => m.prodi === 'PAI').length;
+            const hesCount = mahasiswaBinaan.filter(m => m.prodi === 'HES').length;
+            const mySchedule = state.scheduleList.filter(s => s.dosenId === user.id && s.tahunAkademik === user.tahunAkademik);
+             return `<div class="container mx-auto p-4 space-y-6"><div class="flex justify-between items-center mb-6"><h2 class="text-2xl font-bold text-gray-800">Selamat Datang, ${user.name}</h2><button id="logout-btn" class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg">Keluar</button></div>
+                 <div class="grid grid-cols-1 md:grid-cols-3 gap-6"><div class="md:col-span-2 grid grid-cols-2 gap-6"><div class="bg-gradient-to-br from-green-500 to-green-600 text-white p-6 rounded-xl shadow-lg flex flex-col justify-center"><h4 class="font-semibold text-lg">Mahasiswa PAI</h4><p class="text-4xl font-bold">${paiCount}</p></div><div class="bg-gradient-to-br from-red-500 to-red-600 text-white p-6 rounded-xl shadow-lg flex flex-col justify-center"><h4 class="font-semibold text-lg">Mahasiswa HES</h4><p class="text-4xl font-bold">${hesCount}</p></div></div><div class="bg-white p-4 rounded-xl shadow-lg flex items-center justify-center relative"><canvas id="prodiChart"></canvas></div></div>
+                <div class="bg-white p-6 rounded-lg shadow-lg"><h3 class="text-xl font-semibold mb-4 text-gray-700 border-b pb-2">Jadwal Mengajar Anda (T.A. ${state.academicYears.find(y => y.id === user.tahunAkademik)?.name || user.tahunAkademik})</h3><div class="overflow-x-auto"><table class="w-full text-sm text-left text-gray-500"><thead class="text-xs text-gray-700 uppercase bg-gray-50"><tr><th class="px-6 py-3">Hari</th><th class="px-6 py-3">Waktu</th><th class="px-6 py-3">Mata Kuliah</th><th class="px-6 py-3">Ruangan</th></tr></thead><tbody>${mySchedule.length > 0 ? mySchedule.map(s => `<tr class="bg-white border-b"><td class="px-6 py-4">${s.hari}</td><td class="px-6 py-4">${s.jamMulai} - ${s.jamSelesai}</td><td class="px-6 py-4 font-medium">${state.mataKuliahList.find(mk => mk.id === s.mataKuliahId)?.nama || ''}</td><td class="px-6 py-4">${s.ruangan}</td></tr>`).join('') : `<tr><td colspan="4" class="text-center py-4 text-gray-500">Tidak ada jadwal mengajar untuk tahun akademik Anda.</td></tr>`}</tbody></table></div></div>
+                <div class="bg-white p-6 rounded-lg shadow-lg"><h3 class="text-xl font-semibold mb-4 text-gray-700 border-b pb-2">Pilih Mahasiswa Binaan</h3><div class="space-y-3">${mahasiswaBinaan.length > 0 ? mahasiswaBinaan.map(student => `<button data-id="${student.id}" class="select-student-btn w-full text-left p-4 bg-gray-50 hover:bg-green-100 rounded-lg border border-gray-200 transition duration-300">${student.name} <span class="text-sm text-gray-500">(${student.nim})</span></button>`).join('') : '<p class="text-gray-500">Belum ada mahasiswa binaan.</p>'}</div></div></div>`;
         }
-        
-        function ModalHTML(type, data, dosenList) {
-            const title = { addDosen: 'Tambah Dosen Wali Baru', editDosen: 'Edit Data Dosen Wali', addMhs: 'Tambah Mahasiswa Baru', editMhs: 'Edit Data Mahasiswa', addMk: 'Tambah Mata Kuliah', editMk: 'Edit Mata Kuliah' }[type];
+        function ModalHTML() {
+            const { type, data } = state.modal;
+            const { dosenList, mataKuliahList, academicYears } = state;
+            const title = { addDosen: 'Tambah Dosen Wali', editDosen: 'Edit Data Dosen', addMhs: 'Tambah Mahasiswa', editMhs: 'Edit Data Mahasiswa', addMk: 'Tambah Mata Kuliah', editMk: 'Edit Mata Kuliah', addSchedule: 'Tambah Jadwal Kuliah', editSchedule: 'Edit Jadwal Kuliah'}[type];
             let formContent = '';
-            const academicYearsOptions = state.academicYears.map(y => `<option value="${y.id}" ${data?.tahunAkademik === y.id ? 'selected' : ''}>${y.name}</option>`).join('');
-
+            const academicYearsOptions = academicYears.map(y => `<option value="${y.id}" ${data?.tahunAkademik === y.id ? 'selected' : ''}>${y.name}</option>`).join('');
             if (type.includes('Dosen')) {
-                formContent = `
-                    <div><label class="block text-sm font-medium">Nama Lengkap</label><input type="text" name="name" value="${data?.name || ''}" class="w-full p-2 border rounded" required /></div>
-                    <div><label class="block text-sm font-medium">NIDN</label><input type="text" name="nidn" value="${data?.nidn || ''}" class="w-full p-2 border rounded" required /></div>
-                    <div><label class="block text-sm font-medium">Jabatan</label><input type="text" name="jabatan" value="${data?.jabatan || ''}" class="w-full p-2 border rounded" required /></div>
-                     <div><label class="block text-sm font-medium">Tahun Akademik</label><select name="tahunAkademik" class="w-full p-2 border rounded" required><option value="" disabled selected>-- Pilih Tahun --</option>${academicYearsOptions}</select></div>
-                `;
+                formContent = `<div><label class="block text-sm font-medium">Nama Lengkap</label><input type="text" name="name" value="${data?.name || ''}" class="w-full p-2 border rounded" required /></div><div><label class="block text-sm font-medium">NIDN</label><input type="text" name="nidn" value="${data?.nidn || ''}" class="w-full p-2 border rounded" required /></div><div><label class="block text-sm font-medium">Jabatan</label><input type="text" name="jabatan" value="${data?.jabatan || ''}" class="w-full p-2 border rounded" required /></div><div><label class="block text-sm font-medium">Tahun Akademik</label><select name="tahunAkademik" class="w-full p-2 border rounded" required><option value="" disabled selected>-- Pilih Tahun --</option>${academicYearsOptions}</select></div>`;
             } else if (type.includes('Mhs')) {
-                formContent = `
-                    <div><label class="block text-sm font-medium">Nama Lengkap</label><input type="text" name="name" value="${data?.name || ''}" class="w-full p-2 border rounded" required /></div>
-                    <div><label class="block text-sm font-medium">NIM</label><input type="text" name="nim" value="${data?.nim || ''}" class="w-full p-2 border rounded" required /></div>
-                    <div><label class="block text-sm font-medium">Program Studi</label><select name="prodi" class="w-full p-2 border rounded"><option value="PAI" ${data?.prodi === 'PAI' ? 'selected' : ''}>PAI</option><option value="HES" ${data?.prodi === 'HES' ? 'selected' : ''}>HES</option></select></div>
-                    <div><label class="block text-sm font-medium">Semester</label><input type="text" inputmode="numeric" name="semester" value="${data?.semester || ''}" class="w-full p-2 border rounded" required /></div>
-                    <div><label class="block text-sm font-medium">Tahun Akademik</label><select name="tahunAkademik" class="w-full p-2 border rounded" required><option value="" disabled selected>-- Pilih Tahun --</option>${academicYearsOptions}</select></div>
-                    <div><label class="block text-sm font-medium">Dosen Wali</label>
-                        <select name="lecturerId" class="w-full p-2 border rounded" required>
-                            <option value="" disabled>-- Pilih Dosen Wali --</option>
-                            ${dosenList.map(d => `<option value="${d.id}" ${data?.lecturerId === d.id ? 'selected' : ''}>${d.name}</option>`).join('')}
-                        </select>
-                    </div>`;
+                formContent = `<div><label class="block text-sm font-medium">Nama Lengkap</label><input type="text" name="name" value="${data?.name || ''}" class="w-full p-2 border rounded" required /></div><div><label class="block text-sm font-medium">NIM</label><input type="text" name="nim" value="${data?.nim || ''}" class="w-full p-2 border rounded" required /></div><div><label class="block text-sm font-medium">Program Studi</label><select name="prodi" class="w-full p-2 border rounded"><option value="PAI" ${data?.prodi === 'PAI' ? 'selected' : ''}>PAI</option><option value="HES" ${data?.prodi === 'HES' ? 'selected' : ''}>HES</option></select></div><div><label class="block text-sm font-medium">Semester</label><input type="text" inputmode="numeric" name="semester" value="${data?.semester || ''}" class="w-full p-2 border rounded" required /></div><div><label class="block text-sm font-medium">Tahun Akademik</label><select name="tahunAkademik" class="w-full p-2 border rounded" required><option value="" disabled selected>-- Pilih Tahun --</option>${academicYearsOptions}</select></div><div><label class="block text-sm font-medium">Dosen Wali</label><select name="lecturerId" class="w-full p-2 border rounded" required><option value="" disabled>-- Pilih Dosen Wali --</option>${dosenList.map(d => `<option value="${d.id}" ${data?.lecturerId === d.id ? 'selected' : ''}>${d.name}</option>`).join('')}</select></div>`;
             } else if (type.includes('Mk')) {
-                formContent = `
-                    <div><label class="block text-sm font-medium">Kode Mata Kuliah</label><input type="text" name="kode" value="${data?.kode || ''}" class="w-full p-2 border rounded" required /></div>
-                    <div><label class="block text-sm font-medium">Nama Mata Kuliah</label><input type="text" name="nama" value="${data?.nama || ''}" class="w-full p-2 border rounded" required /></div>
-                    <div><label class="block text-sm font-medium">Jumlah SKS</label><input type="number" name="sks" value="${data?.sks || ''}" class="w-full p-2 border rounded" required /></div>
-                    <div><label class="block text-sm font-medium">Mata Kuliah Prasyarat (Opsional)</label><input type="text" name="prasyarat" value="${data?.prasyarat || ''}" class="w-full p-2 border rounded" /></div>
-                    <div><label class="block text-sm font-medium">Tahun Akademik</label><select name="tahunAkademik" class="w-full p-2 border rounded" required><option value="" disabled selected>-- Pilih Tahun --</option>${academicYearsOptions}</select></div>
-                `;
+                formContent = `<div><label class="block text-sm font-medium">Kode Mata Kuliah</label><input type="text" name="kode" value="${data?.kode || ''}" class="w-full p-2 border rounded" required /></div><div><label class="block text-sm font-medium">Nama Mata Kuliah</label><input type="text" name="nama" value="${data?.nama || ''}" class="w-full p-2 border rounded" required /></div><div><label class="block text-sm font-medium">Jumlah SKS</label><input type="number" name="sks" value="${data?.sks || ''}" class="w-full p-2 border rounded" required /></div><div><label class="block text-sm font-medium">Mata Kuliah Prasyarat (Opsional)</label><input type="text" name="prasyarat" value="${data?.prasyarat || ''}" class="w-full p-2 border rounded" /></div><div><label class="block text-sm font-medium">Tahun Akademik</label><select name="tahunAkademik" class="w-full p-2 border rounded" required><option value="" disabled selected>-- Pilih Tahun --</option>${academicYearsOptions}</select></div>`;
+            } else if (type.includes('Schedule')) {
+                 const mataKuliahOptions = mataKuliahList.map(mk => `<option value="${mk.id}" ${data?.mataKuliahId === mk.id ? 'selected' : ''}>${mk.nama}</option>`).join('');
+                 const dosenOptions = dosenList.map(d => `<option value="${d.id}" ${data?.dosenId === d.id ? 'selected' : ''}>${d.name}</option>`).join('');
+                 const hariOptions = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'].map(h => `<option value="${h}" ${data?.hari === h ? 'selected' : ''}>${h}</option>`).join('');
+                 formContent = `<div><label class="block text-sm font-medium">Tahun Akademik</label><select name="tahunAkademik" class="w-full p-2 border rounded" required><option value="" disabled selected>-- Pilih --</option>${academicYearsOptions}</select></div><div><label class="block text-sm font-medium">Mata Kuliah</label><select name="mataKuliahId" class="w-full p-2 border rounded" required><option value="" disabled selected>-- Pilih --</option>${mataKuliahOptions}</select></div><div><label class="block text-sm font-medium">Dosen Pengampu</label><select name="dosenId" class="w-full p-2 border rounded" required><option value="" disabled selected>-- Pilih --</option>${dosenOptions}</select></div><div><label class="block text-sm font-medium">Hari</label><select name="hari" class="w-full p-2 border rounded" required><option value="" disabled selected>-- Pilih --</option>${hariOptions}</select></div><div class="grid grid-cols-2 gap-4"><div><label class="block text-sm font-medium">Jam Mulai</label><input type="time" name="jamMulai" value="${data?.jamMulai || ''}" class="w-full p-2 border rounded" required /></div><div><label class="block text-sm font-medium">Jam Selesai</label><input type="time" name="jamSelesai" value="${data?.jamSelesai || ''}" class="w-full p-2 border rounded" required /></div></div><div><label class="block text-sm font-medium">Ruangan</label><input type="text" name="ruangan" value="${data?.ruangan || ''}" class="w-full p-2 border rounded" required /></div>`;
             }
-            
-            return `
-            <div id="modal-backdrop" class="fixed inset-0 bg-black bg-opacity-50 z-50 flex justify-center items-center p-4">
-                <div class="bg-white p-6 rounded-lg shadow-xl w-full max-w-lg relative max-h-full overflow-y-auto">
-                    <button id="modal-close-btn" class="absolute top-2 right-2 text-gray-500 hover:text-gray-800 text-2xl">&times;</button>
-                    <form id="user-form" data-type="${type}" data-id="${data?.id || ''}" class="space-y-4">
-                        <h3 class="text-xl font-semibold">${title}</h3>
-                        ${formContent}
-                        <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg">Simpan</button>
-                    </form>
-                </div>
-            </div>`;
+            return `<div id="modal-backdrop" class="fixed inset-0 bg-black bg-opacity-50 z-50 flex justify-center items-center p-4"><div class="bg-white p-6 rounded-lg shadow-xl w-full max-w-lg relative max-h-full overflow-y-auto"><button id="modal-close-btn" class="absolute top-2 right-2 text-gray-500 hover:text-gray-800 text-2xl">&times;</button><form id="user-form" data-type="${type}" data-id="${data?.id || ''}" class="space-y-4"><h3 class="text-xl font-semibold">${title}</h3>${formContent}<button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg">Simpan</button></form></div></div>`;
         }
-        
         function PerwalianChannelHTML(user, otherUserId, allUsers) {
             const isDosen = user.role === 'dosen';
             const mahasiswa = isDosen ? allUsers[otherUserId] : user;
             const dosen = isDosen ? user : allUsers[otherUserId];
             const otherUserName = isDosen ? mahasiswa.name : dosen.name;
             const tahunAkademikNama = state.academicYears.find(y => y.id === mahasiswa.tahunAkademik)?.name || mahasiswa.tahunAkademik;
-
+            const jadwalKuliah = state.scheduleList.filter(s => s.tahunAkademik === mahasiswa.tahunAkademik);
             const channelId = `${dosen.id}_${mahasiswa.id}`;
             const krsId = `${mahasiswa.tahunAkademik}_${mahasiswa.id}`;
-            
             onSnapshot(doc(db, `/artifacts/${appId}/public/data/krs_submissions`, krsId), (docSnap) => {
                 const krsSubmission = docSnap.exists() ? { id: docSnap.id, ...docSnap.data() } : null;
                 const availableCourses = state.mataKuliahList.filter(mk => mk.tahunAkademik === mahasiswa.tahunAkademik);
                 const krsContainer = document.getElementById('krs-section-container');
                 if (krsContainer) {
                     krsContainer.innerHTML = KrsSectionHTML(user, krsSubmission, availableCourses);
-                    attachPerwalianListeners(); // Re-attach listeners after re-render
+                    attachPerwalianListeners();
                 }
             });
-            
             onSnapshot(doc(db, `/artifacts/${appId}/public/data/perwalian_channels`, channelId), (docSnap) => {
                 const messages = docSnap.exists() ? docSnap.data().messages || [] : [];
                 const chatContainer = document.getElementById('chat-section-container');
                  if (chatContainer) {
                     chatContainer.innerHTML = ChatSectionHTML(user, messages, allUsers, otherUserId);
-                    attachPerwalianListeners(); // Re-attach listeners after re-render
+                    attachPerwalianListeners();
                 }
             });
-
-            return `
-            <div class="container mx-auto p-4 flex flex-col h-full" style="max-height: calc(100vh - 150px);">
-                <div class="flex justify-between items-center mb-4">
-                    <h2 class="text-xl md:text-2xl font-bold text-gray-800">${isDosen ? `Perwalian dengan ${otherUserName}` : 'Dashboard Mahasiswa'}</h2>
-                    <button id="back-btn" class="bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg">${isDosen ? 'Pilih Mahasiswa Lain' : 'Keluar'}</button>
-                </div>
-
-                ${!isDosen ? `
-                <div class="bg-white p-4 rounded-lg shadow-md mb-6">
-                    <h3 class="text-lg font-semibold text-gray-800 mb-2">${mahasiswa.name}</h3>
-                    <div class="grid grid-cols-2 gap-x-4 gap-y-1 text-sm text-gray-600">
-                        <div><strong>NIM:</strong> ${mahasiswa.nim}</div>
-                        <div><strong>Semester:</strong> ${mahasiswa.semester}</div>
-                        <div class="col-span-2"><strong>Tahun Akademik:</strong> ${tahunAkademikNama}</div>
-                    </div>
-                </div>
-                ` : ''}
-
+            return `<div class="container mx-auto p-4 flex flex-col h-full" style="max-height: calc(100vh - 120px);">
+                <div class="flex justify-between items-center mb-4"><h2 class="text-xl md:text-2xl font-bold text-gray-800">${isDosen ? `Perwalian dengan ${otherUserName}` : 'Dashboard Mahasiswa'}</h2><button id="back-btn" class="bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg">${isDosen ? 'Pilih Mahasiswa Lain' : 'Keluar'}</button></div>
+                ${!isDosen ? `<div class="bg-white p-4 rounded-lg shadow-md mb-6"><h3 class="text-lg font-semibold text-gray-800 mb-2">${mahasiswa.name}</h3><div class="grid grid-cols-2 gap-x-4 gap-y-1 text-sm text-gray-600"><div><strong>NIM:</strong> ${mahasiswa.nim}</div><div><strong>Semester:</strong> ${mahasiswa.semester}</div><div class="col-span-2"><strong>Tahun Akademik:</strong> ${tahunAkademikNama}</div></div></div>` : ''}
                 <div class="flex-grow grid grid-cols-1 lg:grid-cols-2 gap-6 overflow-hidden">
-                    <!-- Kolom KRS -->
-                    <div class="bg-white p-6 rounded-lg shadow-lg flex flex-col overflow-y-auto">
-                        <h3 class="text-xl font-semibold text-gray-800 border-b pb-2 mb-4">Kartu Rencana Studi (KRS)</h3>
-                        <div id="krs-section-container"><div class="text-center text-gray-400">Memuat data KRS...</div></div>
-                    </div>
-                    <!-- Kolom Chat -->
-                    <div class="bg-white p-6 rounded-lg shadow-lg flex flex-col overflow-y-auto">
-                         <h3 class="text-xl font-semibold text-gray-800 border-b pb-2 mb-4">Diskusi Perwalian</h3>
-                        <div id="chat-section-container"><div class="text-center text-gray-400">Memuat percakapan...</div></div>
-                    </div>
+                    <div class="bg-white p-6 rounded-lg shadow-lg flex flex-col overflow-y-auto"><h3 class="text-xl font-semibold text-gray-800 border-b pb-2 mb-4">Kartu Rencana Studi (KRS)</h3><div id="krs-section-container"><div class="text-center text-gray-400">Memuat data KRS...</div></div></div>
+                    <div class="bg-white p-6 rounded-lg shadow-lg flex flex-col overflow-y-auto"><h3 class="text-xl font-semibold text-gray-800 border-b pb-2 mb-4">Diskusi Perwalian</h3><div id="chat-section-container"><div class="text-center text-gray-400">Memuat percakapan...</div></div></div>
                 </div>
+                ${!isDosen && jadwalKuliah.length > 0 ? `<div class="bg-white p-6 rounded-lg shadow-lg mt-6 overflow-y-auto"><h3 class="text-xl font-semibold text-gray-800 border-b pb-2 mb-4">Jadwal Kuliah (T.A. ${tahunAkademikNama})</h3><div class="overflow-x-auto"><table class="w-full text-sm text-left text-gray-500"><thead class="text-xs text-gray-700 uppercase bg-gray-50"><tr><th class="px-4 py-2">Hari</th><th class="px-4 py-2">Waktu</th><th class="px-4 py-2">Mata Kuliah</th><th class="px-4 py-2">Dosen</th><th class="px-4 py-2">Ruang</th></tr></thead><tbody>${jadwalKuliah.map(s => `<tr class="border-b"><td class="px-4 py-2">${s.hari}</td><td class="px-4 py-2">${s.jamMulai}-${s.jamSelesai}</td><td class="px-4 py-2">${state.mataKuliahList.find(mk => mk.id === s.mataKuliahId)?.nama || '-'}</td><td class="px-4 py-2">${state.dosenList.find(d => d.id === s.dosenId)?.name || '-'}</td><td class="px-4 py-2">${s.ruangan}</td></tr>`).join('')}</tbody></table></div></div>` : ''}
             </div>`;
         }
-
         function KrsSectionHTML(user, krsSubmission, availableCourses) {
             const isDosen = user.role === 'dosen';
-
             if (krsSubmission) {
-                // Tampilan jika KRS sudah diajukan
                 const statusColor = { 'Menunggu': 'bg-yellow-100 text-yellow-800', 'Disetujui': 'bg-green-100 text-green-800', 'Ditolak': 'bg-red-100 text-red-800'}[krsSubmission.status];
                 const submissionDate = new Date(krsSubmission.submittedAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
                 const reviewedDate = krsSubmission.reviewedAt ? new Date(krsSubmission.reviewedAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }) : null;
-
-                return `
-                <div>
-                    <div class="flex justify-between items-center mb-1">
-                        <h4 class="text-lg font-semibold">${isDosen ? 'KRS Mahasiswa' : 'KRS Anda'}</h4>
-                        <span class="px-3 py-1 text-sm font-bold rounded-full ${statusColor}">${krsSubmission.status}</span>
-                    </div>
-                    <p class="text-xs text-gray-500 mb-4">Diajukan pada: ${submissionDate}</p>
-                    
-                    <div class="border rounded-lg p-4 space-y-2">
-                        ${krsSubmission.courses.map(c => `
-                            <div class="flex justify-between items-center text-sm">
-                                <span>${c.kode} - ${c.nama}</span>
-                                <span class="font-semibold">${c.sks} SKS</span>
-                            </div>
-                        `).join('')}
-                        <div class="flex justify-between items-center font-bold border-t pt-2 mt-2">
-                            <span>Total SKS</span>
-                            <span>${krsSubmission.totalSks} SKS</span>
-                        </div>
-                    </div>
-
-                    ${reviewedDate ? `<p class="text-xs text-gray-500 mt-2 text-right">Ditinjau pada: ${reviewedDate}</p>` : ''}
-                    ${krsSubmission.dosenNotes ? `<div class="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm"><p class="font-bold mb-1">Catatan dari Dosen:</p><p>${krsSubmission.dosenNotes}</p></div>` : ''}
-
-                    ${isDosen && krsSubmission.status === 'Menunggu' ? `
-                    <div class="mt-6 flex gap-4">
-                        <button id="approve-krs-btn" data-krsid="${krsSubmission.id}" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg">Setujui</button>
-                        <button id="reject-krs-btn" data-krsid="${krsSubmission.id}" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg">Tolak</button>
-                    </div>` : ''}
-                </div>`;
+                return `<div><div class="flex justify-between items-center mb-1"><h4 class="text-lg font-semibold">${isDosen ? 'KRS Mahasiswa' : 'KRS Anda'}</h4><span class="px-3 py-1 text-sm font-bold rounded-full ${statusColor}">${krsSubmission.status}</span></div><p class="text-xs text-gray-500 mb-4">Diajukan pada: ${submissionDate}</p><div class="border rounded-lg p-4 space-y-2">${krsSubmission.courses.map(c => `<div class="flex justify-between items-center text-sm"><span>${c.kode} - ${c.nama}</span><span class="font-semibold">${c.sks} SKS</span></div>`).join('')}<div class="flex justify-between items-center font-bold border-t pt-2 mt-2"><span>Total SKS</span><span>${krsSubmission.totalSks} SKS</span></div></div>${reviewedDate ? `<p class="text-xs text-gray-500 mt-2 text-right">Ditinjau pada: ${reviewedDate}</p>` : ''}${krsSubmission.dosenNotes ? `<div class="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm"><p class="font-bold mb-1">Catatan dari Dosen:</p><p>${krsSubmission.dosenNotes}</p></div>` : ''}${isDosen && krsSubmission.status === 'Menunggu' ? `<div class="mt-6 flex gap-4"><button id="approve-krs-btn" data-krsid="${krsSubmission.id}" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg">Setujui</button><button id="reject-krs-btn" data-krsid="${krsSubmission.id}" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg">Tolak</button></div>` : ''}</div>`;
             } else {
-                // Tampilan jika KRS belum diajukan
-                if (isDosen) {
-                    return `<p class="text-center text-gray-500 py-10">Mahasiswa belum mengajukan KRS untuk tahun akademik ini.</p>`;
-                }
-                return `
-                <form id="krs-form">
-                    <h4 class="text-lg font-semibold mb-2">Pilih Mata Kuliah</h4>
-                    <div class="space-y-2 max-h-64 overflow-y-auto border rounded-lg p-4 mb-4">
-                        ${availableCourses.length > 0 ? availableCourses.map(mk => `
-                        <label class="flex items-center p-2 rounded-md hover:bg-gray-50">
-                            <input type="checkbox" value="${mk.id}" data-sks="${mk.sks}" data-kode="${mk.kode}" data-nama="${mk.nama}" class="h-4 w-4 text-green-600 border-gray-300 rounded focus:ring-green-500">
-                            <span class="ml-3 text-sm flex-grow">${mk.kode} - ${mk.nama}</span>
-                            <span class="text-sm font-semibold">${mk.sks} SKS</span>
-                        </label>
-                        `).join('') : '<p class="text-gray-500">Tidak ada mata kuliah yang tersedia untuk tahun akademik Anda.</p>'}
-                    </div>
-                     <div class="flex justify-between items-center font-bold text-lg mb-4">
-                        <span>Total SKS Dipilih:</span>
-                        <span id="total-sks">0</span>
-                    </div>
-                    <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg">Ajukan KRS</button>
-                </form>
-                `;
+                if (isDosen) return `<p class="text-center text-gray-500 py-10">Mahasiswa belum mengajukan KRS untuk tahun akademik ini.</p>`;
+                return `<form id="krs-form"><h4 class="text-lg font-semibold mb-2">Pilih Mata Kuliah</h4><div class="space-y-2 max-h-64 overflow-y-auto border rounded-lg p-4 mb-4">${availableCourses.length > 0 ? availableCourses.map(mk => `<label class="flex items-center p-2 rounded-md hover:bg-gray-50"><input type="checkbox" value="${mk.id}" data-sks="${mk.sks}" data-kode="${mk.kode}" data-nama="${mk.nama}" class="h-4 w-4 text-green-600 border-gray-300 rounded focus:ring-green-500"><span class="ml-3 text-sm flex-grow">${mk.kode} - ${mk.nama}</span><span class="text-sm font-semibold">${mk.sks} SKS</span></label>`).join('') : '<p class="text-gray-500">Tidak ada mata kuliah yang tersedia untuk tahun akademik Anda.</p>'}</div><div class="flex justify-between items-center font-bold text-lg mb-4"><span>Total SKS Dipilih:</span><span id="total-sks">0</span></div><button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg">Ajukan KRS</button></form>`;
             }
         }
-
         function ChatSectionHTML(user, messages, allUsers, otherUserId) {
              const sortedMessages = [...messages].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
-             return `
-                <div class="flex-grow overflow-y-auto pr-2 space-y-4 mb-4" id="messages-container" style="min-height: 200px;">
-                     ${sortedMessages.length > 0 ? sortedMessages.map(msg => {
-                        const isYou = msg.senderId === user.id;
-                        const senderName = isYou ? "Anda" : allUsers[msg.senderId]?.name;
-                        return `
-                        <div class="p-3 rounded-lg text-sm ${isYou ? 'bg-green-100' : 'bg-gray-100'}">
-                            <div class="flex justify-between items-center mb-1">
-                                <p class="font-bold text-gray-800">${senderName}</p>
-                                <span class="text-xs text-gray-500">${new Date(msg.timestamp).toLocaleString('id-ID')}</span>
-                            </div>
-                            <p class="text-gray-700">${msg.content.replace(/\n/g, '<br>')}</p>
-                        </div>`;
-                    }).join('') : '<p class="text-gray-500 text-center py-4">Belum ada percakapan.</p>'}
-                </div>
-                <form id="send-message-form" data-otheruser="${otherUserId}" class="mt-auto">
-                    ${user.role === 'dosen' ? `
-                    <select id="message-type-select" class="w-full p-2 mb-2 border border-gray-300 rounded-md shadow-sm text-sm">
-                        <option value="catatan">Catatan</option>
-                        <option value="jadwal">Jadwal</option>
-                        <option value="tanggapan">Tanggapan</option>
-                    </select>` : ''}
-                    <textarea id="new-message-input" rows="3" class="w-full p-2 border border-gray-300 rounded-md shadow-sm" placeholder="Ketik pesan..."></textarea>
-                    <button type="submit" class="w-full mt-2 bg-green-700 hover:bg-green-800 text-white font-bold py-2 px-4 rounded-lg">Kirim</button>
-                </form>
-             `;
+             return `<div class="flex-grow overflow-y-auto pr-2 space-y-4 mb-4" id="messages-container" style="min-height: 200px;">${sortedMessages.length > 0 ? sortedMessages.map(msg => { const isYou = msg.senderId === user.id; const senderName = isYou ? "Anda" : allUsers[msg.senderId]?.name; return `<div class="p-3 rounded-lg text-sm ${isYou ? 'bg-green-100' : 'bg-gray-100'}"><div class="flex justify-between items-center mb-1"><p class="font-bold text-gray-800">${senderName}</p><span class="text-xs text-gray-500">${new Date(msg.timestamp).toLocaleString('id-ID')}</span></div><p class="text-gray-700">${msg.content.replace(/\n/g, '<br>')}</p></div>`; }).join('') : '<p class="text-gray-500 text-center py-4">Belum ada percakapan.</p>'}</div><form id="send-message-form" data-otheruser="${otherUserId}" class="mt-auto">${user.role === 'dosen' ? `<select id="message-type-select" class="w-full p-2 mb-2 border border-gray-300 rounded-md shadow-sm text-sm"><option value="catatan">Catatan</option><option value="jadwal">Jadwal</option><option value="tanggapan">Tanggapan</option></select>` : ''}<textarea id="new-message-input" rows="3" class="w-full p-2 border border-gray-300 rounded-md shadow-sm" placeholder="Ketik pesan..."></textarea><button type="submit" class="w-full mt-2 bg-green-700 hover:bg-green-800 text-white font-bold py-2 px-4 rounded-lg">Kirim</button></form>`;
         }
-
-        // --- INISIALISASI APLIKASI ---
         async function initializeAppLogic() {
-            const performSignIn = async () => {
-                if (!auth.currentUser) {
-                    try {
-                        const token = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
-                        if (token) await signInWithCustomToken(auth, token);
-                        else await signInAnonymously(auth);
-                    } catch (error) {
-                         console.error("Gagal otentikasi:", error);
-                         throw new Error("Proses otentikasi gagal. Pastikan metode login 'Anonymous' sudah diaktifkan di Firebase Console.");
-                    }
-                }
-            };
-            
             try {
-                await performSignIn();
-
+                if (!auth.currentUser) {
+                    const token = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+                    if (token) await signInWithCustomToken(auth, token);
+                    else await signInAnonymously(auth);
+                }
                 onAuthStateChanged(auth, user => {
                     if (user && !state.isAuthReady) {
                         state.isAuthReady = true;
-
-                        // Listen to all data collections
                         onSnapshot(collection(db, `/artifacts/${appId}/public/data/users`), (snapshot) => {
                             const usersData = {}, dosen = [], mahasiswa = [];
-                            snapshot.forEach(doc => {
-                                const userData = { id: doc.id, ...doc.data() };
-                                usersData[doc.id] = userData;
-                                if (userData.role === 'dosen') dosen.push(userData);
-                                else if (userData.role === 'mahasiswa') mahasiswa.push(userData);
-                            });
-                            state.allUsers = usersData;
-                            state.dosenList = dosen;
-                            state.mahasiswaList = mahasiswa;
-                            state.loadingUsers = false;
-                            render();
-                        }, (error) => {
-                             appContainer.innerHTML = renderErrorScreen("Akses Database Ditolak", "Aplikasi tidak diizinkan membaca data pengguna. Pastikan aturan keamanan (Rules) di Firestore sudah benar.");
-                        });
-
+                            snapshot.forEach(doc => { const userData = { id: doc.id, ...doc.data() }; usersData[doc.id] = userData; if (userData.role === 'dosen') dosen.push(userData); else if (userData.role === 'mahasiswa') mahasiswa.push(userData); });
+                            state.allUsers = usersData; state.dosenList = dosen; state.mahasiswaList = mahasiswa; state.loadingUsers = false; render();
+                        }, (error) => { appContainer.innerHTML = renderErrorScreen("Akses Database Ditolak", "Pastikan aturan keamanan (Rules) di Firestore sudah benar."); });
                         onSnapshot(collection(db, `/artifacts/${appId}/public/data/academic_years`), (snapshot) => {
-                            const years = [];
-                            snapshot.forEach(doc => years.push({ id: doc.id, ...doc.data() }));
-                            state.academicYears = years.sort((a,b) => a.id.localeCompare(b.id));
-                            render();
+                            const years = []; snapshot.forEach(doc => years.push({ id: doc.id, ...doc.data() }));
+                            state.academicYears = years.sort((a,b) => a.id.localeCompare(b.id)); render();
                         });
-
-                         onSnapshot(collection(db, `/artifacts/${appId}/public/data/mata_kuliah`), (snapshot) => {
-                            const courses = [];
-                            snapshot.forEach(doc => courses.push({ id: doc.id, ...doc.data() }));
-                            state.mataKuliahList = courses;
-                            state.loadingMataKuliah = false;
-                            render();
+                        onSnapshot(collection(db, `/artifacts/${appId}/public/data/mata_kuliah`), (snapshot) => {
+                            const courses = []; snapshot.forEach(doc => courses.push({ id: doc.id, ...doc.data() }));
+                            state.mataKuliahList = courses; state.loadingMataKuliah = false; render();
                         });
-
+                        onSnapshot(collection(db, `/artifacts/${appId}/public/data/jadwal_kuliah`), (snapshot) => {
+                            const schedules = []; snapshot.forEach(doc => schedules.push({ id: doc.id, ...doc.data() }));
+                            state.scheduleList = schedules.sort((a,b) => a.hari.localeCompare(b.hari)); state.loadingSchedule = false; render();
+                        });
                         onSnapshot(doc(db, `/artifacts/${appId}/public/data/settings`, 'app_config'), (docSnap) => {
-                            state.activeAcademicYear = docSnap.exists() ? docSnap.data().activeAcademicYear : null;
-                            state.loadingSettings = false;
-                            render();
+                            state.activeAcademicYear = docSnap.exists() ? docSnap.data().activeAcademicYear : null; state.loadingSettings = false; render();
                         });
                     }
                 });
                 render();
-            } catch(e) {
-                 appContainer.innerHTML = renderErrorScreen("Gagal Otentikasi", e.message);
-            }
+            } catch(e) { appContainer.innerHTML = renderErrorScreen("Gagal Otentikasi", e.message); }
         }
-
         function renderErrorScreen(title, message) {
-            return `
-                ${AppHeaderHTML()}
-                <main class="flex-grow flex items-center justify-center p-4">
-                    <div class="w-full max-w-lg bg-white p-8 rounded-lg shadow-xl text-center border-t-4 border-red-500">
-                        <h1 class="text-2xl font-bold text-red-600 mb-4">${title}</h1>
-                        <p class="text-gray-700">${message}</p>
-                    </div>
-                </main>
-                ${AppFooterHTML()}
-            `;
+            return `${AppHeaderHTML()}<main class="flex-grow flex items-center justify-center p-4"><div class="w-full max-w-lg bg-white p-8 rounded-lg shadow-xl text-center border-t-4 border-red-500"><h1 class="text-2xl font-bold text-red-600 mb-4">${title}</h1><p class="text-gray-700">${message}</p></div></main>${AppFooterHTML()}`;
         }
-        
         initializeAppLogic();
-
     </script>
 </body>
 </html>
