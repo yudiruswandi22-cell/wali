@@ -23,11 +23,11 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, onSnapshot, setDoc, updateDoc, arrayUnion, collection, addDoc, deleteDoc, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-
+        
         // --- Konfigurasi Firebase ---
         // PENTING: Jika Anda mem-publish aplikasi ini secara mandiri (di luar environment khusus),
         // ganti placeholder di bawah ini dengan konfigurasi Firebase Anda sendiri dari project Firebase Console.
-const firebaseConfig = typeof __firebase_config !== 'undefined' 
+        const firebaseConfig = typeof __firebase_config !== 'undefined' 
             ? JSON.parse(__firebase_config)
             : { 
                 apiKey: "AIzaSyCDx6uqqknaP_ojGvUYGepKbZWnouRyc8c", 
@@ -72,12 +72,21 @@ const firebaseConfig = typeof __firebase_config !== 'undefined'
             mahasiswaList: [],
             mataKuliahList: [],
             scheduleList: [],
+            absensiList: [],
+            nilaiList: [],
+            sapList: [],
             loadingUsers: true,
             loadingMataKuliah: true,
             loadingSchedule: true,
+            loadingAbsensi: true,
+            loadingNilai: true,
+            loadingSap: true,
             notification: null,
             modal: { isOpen: false, type: '', data: null },
             selectedStudentId: null,
+            selectedScheduleForAbsensi: null,
+            selectedLoginUser: null, // User dipilih sebelum verifikasi NIM/NIDN
+            absensiView: 'input', // 'input', 'rekap', 'nilai', 'sap', 'rekap_sap'
             academicYears: [],
             activeAcademicYear: null,
             loadingSettings: true,
@@ -99,7 +108,7 @@ const firebaseConfig = typeof __firebase_config !== 'undefined'
         }
         
         function renderContent() {
-             if (!state.isAuthReady || state.loadingUsers || state.loadingSettings || state.loadingMataKuliah || state.loadingSchedule) {
+             if (!state.isAuthReady || state.loadingUsers || state.loadingSettings || state.loadingMataKuliah || state.loadingSchedule || state.loadingAbsensi || state.loadingNilai || state.loadingSap) {
                 return `<div class="text-center p-10 flex-grow flex items-center justify-center">Memuat data...</div>`;
             }
 
@@ -112,6 +121,9 @@ const firebaseConfig = typeof __firebase_config !== 'undefined'
                 return AdminDashboardHTML();
             }
             if (state.currentUser.role === 'dosen') {
+                if(state.selectedScheduleForAbsensi) {
+                    return AbsensiPageHTML();
+                }
                 if (state.selectedStudentId) {
                     return PerwalianChannelHTML(state.currentUser, state.selectedStudentId, state.allUsers);
                 }
@@ -165,12 +177,21 @@ const firebaseConfig = typeof __firebase_config !== 'undefined'
                 handleLoginSearch({ target: { value: '' } }); // Panggil sekali untuk menampilkan semua user
             }
 
+            const finalLoginForm = document.getElementById('final-login-form');
+            if(finalLoginForm) finalLoginForm.addEventListener('submit', handleFinalLogin);
+
+            const backToSearchBtn = document.getElementById('back-to-search-btn');
+            if(backToSearchBtn) backToSearchBtn.addEventListener('click', () => {
+                state.selectedLoginUser = null;
+                render();
+            });
+
             const logoutBtn = document.getElementById('logout-btn');
             if (logoutBtn) logoutBtn.addEventListener('click', handleLogout);
             const backBtn = document.getElementById('back-btn');
             if(backBtn) backBtn.addEventListener('click', () => {
                 if (state.currentUser.role === 'mahasiswa') handleLogout();
-                else { state.selectedStudentId = null; render(); }
+                else { state.selectedStudentId = null; state.selectedScheduleForAbsensi = null; render(); }
             });
             
             if (state.currentUser?.role === 'admin') {
@@ -197,7 +218,26 @@ const firebaseConfig = typeof __firebase_config !== 'undefined'
             document.querySelectorAll('.select-student-btn').forEach(btn => {
                 btn.addEventListener('click', (e) => { state.selectedStudentId = e.currentTarget.dataset.id; render(); });
             });
+            document.querySelectorAll('.input-absensi-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => { 
+                    state.selectedScheduleForAbsensi = state.scheduleList.find(s => s.id === e.currentTarget.dataset.scheduleid);
+                    state.absensiView = 'input'; // Default to input view
+                    render(); 
+                });
+            });
+
+            document.querySelectorAll('.sap-accordion-toggle').forEach(button => {
+                button.addEventListener('click', (e) => {
+                    const targetId = e.currentTarget.dataset.target;
+                    const target = document.getElementById(targetId);
+                    if(target) {
+                        target.classList.toggle('hidden');
+                    }
+                });
+            });
+
             attachPerwalianListeners();
+            attachAbsensiListeners();
         }
 
         function attachPerwalianListeners() {
@@ -212,6 +252,46 @@ const firebaseConfig = typeof __firebase_config !== 'undefined'
             if (approveKrsBtn) approveKrsBtn.addEventListener('click', handleApproveKrs);
             const rejectKrsBtn = document.getElementById('reject-krs-btn');
             if (rejectKrsBtn) rejectKrsBtn.addEventListener('click', handleRejectKrs);
+        }
+
+        function attachAbsensiListeners() {
+            const absensiForm = document.getElementById('absensi-form');
+            if(absensiForm) absensiForm.addEventListener('submit', handleSaveAbsensi);
+            const pertemuanSelect = document.getElementById('pertemuan-select');
+            if(pertemuanSelect) pertemuanSelect.addEventListener('change', () => {
+                render();
+            });
+
+            document.getElementById('tab-input-absensi')?.addEventListener('click', () => {
+                state.absensiView = 'input';
+                render();
+            });
+             document.getElementById('tab-rekap-absensi')?.addEventListener('click', () => {
+                state.absensiView = 'rekap';
+                render();
+            });
+            document.getElementById('tab-input-nilai')?.addEventListener('click', () => {
+                state.absensiView = 'nilai';
+                render();
+            });
+             document.getElementById('tab-input-sap')?.addEventListener('click', () => {
+                state.absensiView = 'sap';
+                render();
+            });
+            document.getElementById('tab-rekap-sap')?.addEventListener('click', () => {
+                state.absensiView = 'rekap_sap';
+                render();
+            });
+
+            document.getElementById('nilai-form')?.addEventListener('submit', handleSaveNilai);
+            document.querySelectorAll('.grade-input').forEach(input => {
+                input.addEventListener('input', () => {
+                    const studentId = input.closest('tr').dataset.studentid;
+                    updateFinalGrade(studentId);
+                });
+            });
+
+            document.getElementById('sap-form')?.addEventListener('submit', handleSaveSap);
         }
         
         // --- HANDLER FUNCTIONS ---
@@ -237,8 +317,29 @@ const firebaseConfig = typeof __firebase_config !== 'undefined'
             const selectedUserId = e.currentTarget.dataset.userid;
             if (selectedUserId) {
                 const usersForLogin = { ...state.allUsers, 'admin_001': { id: 'admin_001', name: 'Administrator', role: 'admin' } };
-                state.currentUser = usersForLogin[selectedUserId];
+                if(selectedUserId === 'admin_001') {
+                    state.currentUser = usersForLogin[selectedUserId];
+                } else {
+                    state.selectedLoginUser = usersForLogin[selectedUserId];
+                }
                 render();
+            }
+        }
+
+        function handleFinalLogin(e) {
+            e.preventDefault();
+            const user = state.selectedLoginUser;
+            if (!user) return;
+
+            const inputId = document.getElementById('login-id-input').value.trim();
+            const actualId = user.role === 'mahasiswa' ? user.nim : user.nidn;
+
+            if (inputId === actualId) {
+                state.currentUser = user;
+                state.selectedLoginUser = null;
+                render();
+            } else {
+                setNotification({ type: 'error', message: 'NIM/NIDN yang Anda masukkan salah.' });
             }
         }
 
@@ -268,7 +369,6 @@ const firebaseConfig = typeof __firebase_config !== 'undefined'
                 resultsContainer.innerHTML = `<p class="p-4 text-center text-gray-500">Tidak ada akun yang cocok.</p>`;
             }
 
-            // Attach click listeners to the new buttons
             document.querySelectorAll('.login-user-btn').forEach(btn => {
                 btn.addEventListener('click', handleLoginClick);
             });
@@ -277,6 +377,8 @@ const firebaseConfig = typeof __firebase_config !== 'undefined'
         function handleLogout() {
             state.currentUser = null;
             state.selectedStudentId = null;
+            state.selectedScheduleForAbsensi = null;
+            state.selectedLoginUser = null;
             render();
         }
 
@@ -291,7 +393,6 @@ const firebaseConfig = typeof __firebase_config !== 'undefined'
                     setNotification({ type: 'success', message: `Tahun Akademik ${year} berhasil ditambahkan.` });
                     input.value = '';
                 } catch (error) {
-                    console.error("Error adding academic year:", error);
                     setNotification({ type: 'error', message: 'Gagal menambahkan tahun akademik.' });
                 }
             } else {
@@ -305,7 +406,6 @@ const firebaseConfig = typeof __firebase_config !== 'undefined'
                 await setDoc(doc(db, `/artifacts/${appId}/public/data/settings`, 'app_config'), { activeAcademicYear: yearId });
                 setNotification({ type: 'success', message: 'Tahun akademik aktif telah diperbarui.' });
             } catch (error) {
-                console.error("Error setting active academic year:", error);
                 setNotification({ type: 'error', message: 'Gagal mengatur tahun akademik aktif.' });
             }
         }
@@ -452,6 +552,102 @@ const firebaseConfig = typeof __firebase_config !== 'undefined'
                 setNotification({ type: 'success', message: 'KRS telah ditolak.' });
             } catch (error) { setNotification({ type: 'error', message: 'Gagal menolak KRS.' }); }
         }
+        
+        async function handleSaveAbsensi(e) {
+            e.preventDefault();
+            const form = e.target;
+            const pertemuanKe = form.querySelector('#pertemuan-select').value;
+            const scheduleId = state.selectedScheduleForAbsensi.id;
+            
+            const absensiData = {};
+            form.querySelectorAll('.student-row').forEach(row => {
+                const studentId = row.dataset.studentid;
+                const status = row.querySelector('input[type="radio"]:checked').value;
+                absensiData[studentId] = status;
+            });
+
+            const absensiDocId = `${scheduleId}_${pertemuanKe}`;
+            try {
+                await setDoc(doc(db, `/artifacts/${appId}/public/data/absensi`, absensiDocId), {
+                    scheduleId: scheduleId,
+                    pertemuanKe: Number(pertemuanKe),
+                    tanggal: new Date().toISOString(),
+                    absensiData: absensiData
+                });
+                setNotification({type: 'success', message: `Absensi pertemuan ke-${pertemuanKe} berhasil disimpan.`});
+            } catch(error) {
+                console.error("Error saving attendance:", error);
+                setNotification({type: 'error', message: 'Gagal menyimpan absensi.'});
+            }
+        }
+
+        async function handleSaveNilai(e) {
+            e.preventDefault();
+            const form = e.target;
+            const scheduleId = state.selectedScheduleForAbsensi.id;
+            const gradesData = {};
+            form.querySelectorAll('.student-row').forEach(row => {
+                const studentId = row.dataset.studentid;
+                gradesData[studentId] = {
+                    tugas: Number(row.querySelector('input[name="tugas"]').value),
+                    uts: Number(row.querySelector('input[name="uts"]').value),
+                    uas: Number(row.querySelector('input[name="uas"]').value),
+                    kehadiran: Number(row.querySelector('.kehadiran-score').textContent),
+                    nilaiAkhir: Number(row.querySelector('.nilai-akhir').textContent),
+                    nilaiHuruf: row.querySelector('.nilai-huruf').textContent
+                };
+            });
+            try {
+                await setDoc(doc(db, `/artifacts/${appId}/public/data/nilai_mahasiswa`, scheduleId), {
+                    scheduleId: scheduleId,
+                    gradesData: gradesData
+                }, { merge: true });
+                 setNotification({type: 'success', message: `Nilai berhasil disimpan.`});
+            } catch(error) {
+                console.error("Error saving grades:", error);
+                setNotification({type: 'error', message: 'Gagal menyimpan nilai.'});
+            }
+        }
+
+        async function handleSaveSap(e) {
+            e.preventDefault();
+            const form = e.target;
+            const formData = new FormData(form);
+            const data = Object.fromEntries(formData.entries());
+            const pertemuanKe = document.getElementById('pertemuan-select-sap').value;
+            const scheduleId = state.selectedScheduleForAbsensi.id;
+            const sapDocId = `${scheduleId}_${pertemuanKe}`;
+            
+            const payload = { ...data, scheduleId, pertemuanKe: Number(pertemuanKe) };
+            
+            try {
+                await setDoc(doc(db, `/artifacts/${appId}/public/data/sap`, sapDocId), payload);
+                setNotification({ type: 'success', message: `SAP untuk pertemuan ke-${pertemuanKe} berhasil disimpan.` });
+            } catch (error) {
+                console.error("Error saving SAP:", error);
+                setNotification({ type: 'error', message: 'Gagal menyimpan SAP.' });
+            }
+        }
+        
+        function updateFinalGrade(studentId) {
+            const row = document.querySelector(`.student-row[data-studentid="${studentId}"]`);
+            if (!row) return;
+
+            const tugas = Number(row.querySelector('input[name="tugas"]').value) || 0;
+            const uts = Number(row.querySelector('input[name="uts"]').value) || 0;
+            const uas = Number(row.querySelector('input[name="uas"]').value) || 0;
+            const kehadiran = Number(row.querySelector('.kehadiran-score').textContent) || 0;
+
+            const nilaiAkhir = (tugas * 0.2) + (uts * 0.3) + (uas * 0.4) + (kehadiran * 0.1);
+            
+            let nilaiHuruf = 'D';
+            if (nilaiAkhir >= 80) nilaiHuruf = 'A';
+            else if (nilaiAkhir >= 70) nilaiHuruf = 'B';
+            else if (nilaiAkhir >= 60) nilaiHuruf = 'C';
+
+            row.querySelector('.nilai-akhir').textContent = nilaiAkhir.toFixed(1);
+            row.querySelector('.nilai-huruf').textContent = nilaiHuruf;
+        }
 
         // --- HTML TEMPLATE FUNCTIONS ---
         function AppHeaderHTML() { return `<header class="bg-green-800 text-white p-4 shadow-md w-full"><div class="container mx-auto flex items-center justify-between"><div class="flex items-center space-x-3"><img src="https://iili.io/KdXnlX2.png" alt="Logo STAI Al-Mas'udiyah" class="h-12 w-12 object-contain"/><h1 class="text-xl md:text-2xl font-bold">SISTEM PERWALIAN</h1></div><span class="text-sm hidden md:block">STAI Al-Mas'udiyah Sukabumi</span></div></header>`; }
@@ -462,6 +658,24 @@ const firebaseConfig = typeof __firebase_config !== 'undefined'
             return `<div class="notification fixed top-5 right-5 text-white p-3 rounded-lg shadow-lg z-50 flex items-center ${typeStyle}"><span class="mr-4">${notification.message}</span><button id="notif-close-btn" class="font-bold text-lg">&times;</button></div>`;
         }
         function LoginPageHTML(users) {
+            if(state.selectedLoginUser) {
+                const user = state.selectedLoginUser;
+                const idLabel = user.role === 'mahasiswa' ? 'NIM' : 'NIDN';
+                return `
+                <div class="flex-grow flex items-center justify-center p-4">
+                    <div class="w-full max-w-md bg-white p-8 rounded-lg shadow-xl text-center">
+                        <img src="https://iili.io/KdXnlX2.png" alt="Logo" class="h-24 w-24 mx-auto mb-4"/>
+                        <h2 class="text-2xl font-bold text-gray-800 mb-2">Verifikasi Akun</h2>
+                        <p class="text-gray-600 mb-6">Anda login sebagai <strong class="text-gray-900">${user.name}</strong>. Silakan masukkan ${idLabel} Anda.</p>
+                        <form id="final-login-form">
+                            <input type="password" id="login-id-input" class="w-full p-3 border border-gray-300 rounded-md shadow-sm focus:ring-green-500 focus:border-green-500" placeholder="Masukkan ${idLabel} di sini..." required>
+                            <button type="submit" class="mt-4 w-full bg-green-700 hover:bg-green-800 text-white font-bold py-3 px-4 rounded-lg transition duration-300">Masuk</button>
+                            <button type="button" id="back-to-search-btn" class="mt-2 w-full text-sm text-gray-600 hover:text-gray-800">Pilih akun lain</button>
+                        </form>
+                    </div>
+                </div>`;
+            }
+            
             return `
             <div class="flex-grow flex items-center justify-center p-4">
                 <div class="w-full max-w-md bg-white p-8 rounded-lg shadow-xl text-center">
@@ -499,7 +713,7 @@ const firebaseConfig = typeof __firebase_config !== 'undefined'
             const mySchedule = state.scheduleList.filter(s => s.dosenId === user.id && s.tahunAkademik === user.tahunAkademik);
              return `<div class="container mx-auto p-4 space-y-6"><div class="flex justify-between items-center mb-6"><h2 class="text-2xl font-bold text-gray-800">Selamat Datang, ${user.name}</h2><button id="logout-btn" class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg">Keluar</button></div>
                  <div class="grid grid-cols-1 md:grid-cols-3 gap-6"><div class="md:col-span-2 grid grid-cols-2 gap-6"><div class="bg-gradient-to-br from-green-500 to-green-600 text-white p-6 rounded-xl shadow-lg flex flex-col justify-center"><h4 class="font-semibold text-lg">Mahasiswa PAI</h4><p class="text-4xl font-bold">${paiCount}</p></div><div class="bg-gradient-to-br from-red-500 to-red-600 text-white p-6 rounded-xl shadow-lg flex flex-col justify-center"><h4 class="font-semibold text-lg">Mahasiswa HES</h4><p class="text-4xl font-bold">${hesCount}</p></div></div><div class="bg-white p-4 rounded-xl shadow-lg flex items-center justify-center relative"><canvas id="prodiChart"></canvas></div></div>
-                <div class="bg-white p-6 rounded-lg shadow-lg"><h3 class="text-xl font-semibold mb-4 text-gray-700 border-b pb-2">Jadwal Mengajar Anda (T.A. ${state.academicYears.find(y => y.id === user.tahunAkademik)?.name || user.tahunAkademik})</h3><div class="overflow-x-auto"><table class="w-full text-sm text-left text-gray-500"><thead class="text-xs text-gray-700 uppercase bg-gray-50"><tr><th class="px-6 py-3">Hari</th><th class="px-6 py-3">Waktu</th><th class="px-6 py-3">Mata Kuliah</th><th class="px-6 py-3">Ruangan</th></tr></thead><tbody>${mySchedule.length > 0 ? mySchedule.map(s => `<tr class="bg-white border-b"><td class="px-6 py-4">${s.hari}</td><td class="px-6 py-4">${s.jamMulai} - ${s.jamSelesai}</td><td class="px-6 py-4 font-medium">${state.mataKuliahList.find(mk => mk.id === s.mataKuliahId)?.nama || ''}</td><td class="px-6 py-4">${s.ruangan}</td></tr>`).join('') : `<tr><td colspan="4" class="text-center py-4 text-gray-500">Tidak ada jadwal mengajar untuk tahun akademik Anda.</td></tr>`}</tbody></table></div></div>
+                <div class="bg-white p-6 rounded-lg shadow-lg"><h3 class="text-xl font-semibold mb-4 text-gray-700 border-b pb-2">Jadwal Mengajar Anda (T.A. ${state.academicYears.find(y => y.id === user.tahunAkademik)?.name || user.tahunAkademik})</h3><div class="overflow-x-auto"><table class="w-full text-sm text-left text-gray-500"><thead class="text-xs text-gray-700 uppercase bg-gray-50"><tr><th class="px-6 py-3">Hari</th><th class="px-6 py-3">Waktu</th><th class="px-6 py-3">Mata Kuliah</th><th class="px-6 py-3">Ruangan</th><th class="px-6 py-3">Aksi</th></tr></thead><tbody>${mySchedule.length > 0 ? mySchedule.map(s => `<tr class="bg-white border-b"><td class="px-6 py-4">${s.hari}</td><td class="px-6 py-4">${s.jamMulai} - ${s.jamSelesai}</td><td class="px-6 py-4 font-medium">${state.mataKuliahList.find(mk => mk.id === s.mataKuliahId)?.nama || ''}</td><td class="px-6 py-4">${s.ruangan}</td><td class="px-6 py-4"><button data-scheduleid="${s.id}" class="input-absensi-btn text-blue-600 hover:underline font-semibold">Detail Kelas</button></td></tr>`).join('') : `<tr><td colspan="5" class="text-center py-4 text-gray-500">Tidak ada jadwal mengajar untuk tahun akademik Anda.</td></tr>`}</tbody></table></div></div>
                 <div class="bg-white p-6 rounded-lg shadow-lg"><h3 class="text-xl font-semibold mb-4 text-gray-700 border-b pb-2">Pilih Mahasiswa Binaan</h3><div class="space-y-3">${mahasiswaBinaan.length > 0 ? mahasiswaBinaan.map(student => `<button data-id="${student.id}" class="select-student-btn w-full text-left p-4 bg-gray-50 hover:bg-green-100 rounded-lg border border-gray-200 transition duration-300">${student.name} <span class="text-sm text-gray-500">(${student.nim})</span></button>`).join('') : '<p class="text-gray-500">Belum ada mahasiswa binaan.</p>'}</div></div></div>`;
         }
         function ModalHTML() {
@@ -555,6 +769,11 @@ const firebaseConfig = typeof __firebase_config !== 'undefined'
                     <div class="bg-white p-6 rounded-lg shadow-lg flex flex-col overflow-y-auto"><h3 class="text-xl font-semibold text-gray-800 border-b pb-2 mb-4">Kartu Rencana Studi (KRS)</h3><div id="krs-section-container"><div class="text-center text-gray-400">Memuat data KRS...</div></div></div>
                     <div class="bg-white p-6 rounded-lg shadow-lg flex flex-col overflow-y-auto"><h3 class="text-xl font-semibold text-gray-800 border-b pb-2 mb-4">Diskusi Perwalian</h3><div id="chat-section-container"><div class="text-center text-gray-400">Memuat percakapan...</div></div></div>
                 </div>
+                ${!isDosen ? `<div class="grid grid-cols-1 md:grid-cols-3 gap-6 mt-6">
+                    <div class="md:col-span-2 bg-white p-6 rounded-lg shadow-lg overflow-y-auto"><h3 class="text-xl font-semibold text-gray-800 border-b pb-2 mb-4">Nilai Mata Kuliah</h3>${NilaiHistoryHTML(mahasiswa)}</div>
+                    <div class="bg-white p-6 rounded-lg shadow-lg overflow-y-auto"><h3 class="text-xl font-semibold text-gray-800 border-b pb-2 mb-4">Riwayat Absensi</h3>${AbsensiHistoryHTML(mahasiswa)}</div>
+                </div>` : ''}
+                ${!isDosen ? `<div class="bg-white p-6 rounded-lg shadow-lg mt-6 overflow-y-auto"><h3 class="text-xl font-semibold text-gray-800 border-b pb-2 mb-4">Rencana Perkuliahan (SAP)</h3>${SapHistoryHTML(mahasiswa)}</div>` : ''}
                 ${!isDosen && jadwalKuliah.length > 0 ? `<div class="bg-white p-6 rounded-lg shadow-lg mt-6 overflow-y-auto"><h3 class="text-xl font-semibold text-gray-800 border-b pb-2 mb-4">Jadwal Kuliah (T.A. ${tahunAkademikNama})</h3><div class="overflow-x-auto"><table class="w-full text-sm text-left text-gray-500"><thead class="text-xs text-gray-700 uppercase bg-gray-50"><tr><th class="px-4 py-2">Hari</th><th class="px-4 py-2">Waktu</th><th class="px-4 py-2">Mata Kuliah</th><th class="px-4 py-2">Dosen</th><th class="px-4 py-2">Ruang</th></tr></thead><tbody>${jadwalKuliah.map(s => `<tr class="border-b"><td class="px-4 py-2">${s.hari}</td><td class="px-4 py-2">${s.jamMulai}-${s.jamSelesai}</td><td class="px-4 py-2">${state.mataKuliahList.find(mk => mk.id === s.mataKuliahId)?.nama || '-'}</td><td class="px-4 py-2">${state.dosenList.find(d => d.id === s.dosenId)?.name || '-'}</td><td class="px-4 py-2">${s.ruangan}</td></tr>`).join('')}</tbody></table></div></div>` : ''}
             </div>`;
         }
@@ -573,6 +792,230 @@ const firebaseConfig = typeof __firebase_config !== 'undefined'
         function ChatSectionHTML(user, messages, allUsers, otherUserId) {
              const sortedMessages = [...messages].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
              return `<div class="flex-grow overflow-y-auto pr-2 space-y-4 mb-4" id="messages-container" style="min-height: 200px;">${sortedMessages.length > 0 ? sortedMessages.map(msg => { const isYou = msg.senderId === user.id; const senderName = isYou ? "Anda" : allUsers[msg.senderId]?.name; return `<div class="p-3 rounded-lg text-sm ${isYou ? 'bg-green-100' : 'bg-gray-100'}"><div class="flex justify-between items-center mb-1"><p class="font-bold text-gray-800">${senderName}</p><span class="text-xs text-gray-500">${new Date(msg.timestamp).toLocaleString('id-ID')}</span></div><p class="text-gray-700">${msg.content.replace(/\n/g, '<br>')}</p></div>`; }).join('') : '<p class="text-gray-500 text-center py-4">Belum ada percakapan.</p>'}</div><form id="send-message-form" data-otheruser="${otherUserId}" class="mt-auto">${user.role === 'dosen' ? `<select id="message-type-select" class="w-full p-2 mb-2 border border-gray-300 rounded-md shadow-sm text-sm"><option value="catatan">Catatan</option><option value="jadwal">Jadwal</option><option value="tanggapan">Tanggapan</option></select>` : ''}<textarea id="new-message-input" rows="3" class="w-full p-2 border border-gray-300 rounded-md shadow-sm" placeholder="Ketik pesan..."></textarea><button type="submit" class="w-full mt-2 bg-green-700 hover:bg-green-800 text-white font-bold py-2 px-4 rounded-lg">Kirim</button></form>`;
+        }
+        function AbsensiPageHTML() {
+            const schedule = state.selectedScheduleForAbsensi;
+            const mataKuliah = state.mataKuliahList.find(mk => mk.id === schedule.mataKuliahId);
+            let content;
+            switch(state.absensiView) {
+                case 'input': content = AbsensiInputHTML(); break;
+                case 'rekap': content = AbsensiRekapHTML(); break;
+                case 'nilai': content = NilaiInputHTML(); break;
+                case 'sap': content = SapInputHTML(); break;
+                case 'rekap_sap': content = SapRekapHTML(); break;
+                default: content = AbsensiInputHTML();
+            }
+            return `<div class="container mx-auto p-4"><div class="flex justify-between items-center mb-4"><h2 class="text-2xl font-bold text-gray-800">Detail Kelas: ${mataKuliah.nama}</h2><button id="back-btn" class="bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg">Kembali</button></div>
+            <div class="bg-white p-6 rounded-lg shadow-lg">
+                <div class="border-b mb-4">
+                    <nav class="flex space-x-4 overflow-x-auto pb-2">
+                        <button id="tab-input-absensi" class="py-2 px-4 font-semibold whitespace-nowrap ${state.absensiView === 'input' ? 'border-b-2 border-blue-500 text-blue-600' : 'text-gray-500'}">Input Absensi</button>
+                        <button id="tab-rekap-absensi" class="py-2 px-4 font-semibold whitespace-nowrap ${state.absensiView === 'rekap' ? 'border-b-2 border-blue-500 text-blue-600' : 'text-gray-500'}">Rekap Absensi</button>
+                        <button id="tab-input-nilai" class="py-2 px-4 font-semibold whitespace-nowrap ${state.absensiView === 'nilai' ? 'border-b-2 border-blue-500 text-blue-600' : 'text-gray-500'}">Input Nilai</button>
+                        <button id="tab-input-sap" class="py-2 px-4 font-semibold whitespace-nowrap ${state.absensiView === 'sap' ? 'border-b-2 border-blue-500 text-blue-600' : 'text-gray-500'}">Input SAP</button>
+                        <button id="tab-rekap-sap" class="py-2 px-4 font-semibold whitespace-nowrap ${state.absensiView === 'rekap_sap' ? 'border-b-2 border-blue-500 text-blue-600' : 'text-gray-500'}">Rekap SAP</button>
+                    </nav>
+                </div>
+                ${content}
+            </div></div>`;
+        }
+        function AbsensiInputHTML() {
+            const schedule = state.selectedScheduleForAbsensi;
+            const students = state.mahasiswaList.filter(m => m.tahunAkademik === schedule.tahunAkademik);
+            const pertemuanKe = document.getElementById('pertemuan-select')?.value || 1;
+            const absensiRecord = state.absensiList.find(a => a.scheduleId === schedule.id && a.pertemuanKe == pertemuanKe);
+             return `<form id="absensi-form">
+                    <div class="mb-4"><label for="pertemuan-select" class="block text-sm font-medium text-gray-700">Pilih Pertemuan Ke:</label>
+                    <select id="pertemuan-select" class="mt-1 p-2 border rounded-md w-full md:w-1/4">
+                        ${Array.from({length: 16}, (_, i) => `<option value="${i+1}" ${pertemuanKe == i+1 ? 'selected' : ''}>${i+1}</option>`).join('')}
+                    </select></div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm text-left">
+                            <thead class="text-xs text-gray-700 uppercase bg-gray-50"><tr><th class="px-4 py-2">Nama Mahasiswa</th><th class="px-4 py-2 text-center">Hadir</th><th class="px-4 py-2 text-center">Izin</th><th class="px-4 py-2 text-center">Sakit</th><th class="px-4 py-2 text-center">Alpa</th></tr></thead>
+                            <tbody>${students.map(student => {
+                                const status = absensiRecord?.absensiData[student.id] || 'Hadir'; // Default to Hadir
+                                return `<tr class="border-b student-row" data-studentid="${student.id}"><td class="px-4 py-2 font-medium">${student.name}</td>
+                                    ${['Hadir', 'Izin', 'Sakit', 'Alpa'].map(s => `<td class="text-center"><input type="radio" name="status-${student.id}" value="${s}" ${status === s ? 'checked' : ''}></td>`).join('')}
+                                </tr>`;
+                            }).join('')}</tbody>
+                        </table>
+                    </div>
+                    <button type="submit" class="mt-6 w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg">Simpan Absensi</button>
+                </form>`;
+        }
+        function AbsensiRekapHTML() {
+            const schedule = state.selectedScheduleForAbsensi;
+            const students = state.mahasiswaList.filter(m => m.tahunAkademik === schedule.tahunAkademik);
+            const attendanceForThisSchedule = state.absensiList.filter(a => a.scheduleId === schedule.id);
+            const statusColors = { H: 'bg-green-100 text-green-800', I: 'bg-blue-100 text-blue-800', S: 'bg-yellow-100 text-yellow-800', A: 'bg-red-100 text-red-800' };
+
+            return `<div class="overflow-x-auto">
+                        <table class="w-full text-xs text-left">
+                            <thead class="text-gray-700 uppercase bg-gray-50">
+                                <tr>
+                                    <th class="px-2 py-2">Nama Mahasiswa</th>
+                                    ${Array.from({length: 16}, (_, i) => `<th class="px-2 py-2 text-center">${i+1}</th>`).join('')}
+                                    <th class="px-2 py-2 text-center">H</th><th class="px-2 py-2 text-center">I</th><th class="px-2 py-2 text-center">S</th><th class="px-2 py-2 text-center">A</th>
+                                </tr>
+                            </thead>
+                            <tbody>${students.map(student => {
+                                let summary = { Hadir: 0, Izin: 0, Sakit: 0, Alpa: 0 };
+                                const cells = Array.from({length: 16}, (_, i) => {
+                                    const record = attendanceForThisSchedule.find(a => a.pertemuanKe == i + 1);
+                                    const status = record ? record.absensiData[student.id] : null;
+                                    if (status) summary[status]++;
+                                    const initial = status ? status.charAt(0) : '-';
+                                    const color = status ? statusColors[initial] : 'bg-gray-100';
+                                    return `<td class="text-center"><span class="inline-block w-5 h-5 rounded-full ${color} font-semibold flex items-center justify-center">${initial}</span></td>`;
+                                }).join('');
+                                return `<tr class="border-b"><td class="px-2 py-2 font-medium">${student.name}</td>${cells}<td class="px-2 py-2 text-center font-bold">${summary.Hadir}</td><td class="px-2 py-2 text-center font-bold">${summary.Izin}</td><td class="px-2 py-2 text-center font-bold">${summary.Sakit}</td><td class="px-2 py-2 text-center font-bold">${summary.Alpa}</td></tr>`;
+                            }).join('')}</tbody>
+                        </table>
+                    </div>`;
+        }
+         function NilaiInputHTML() {
+            const schedule = state.selectedScheduleForAbsensi;
+            const students = state.mahasiswaList.filter(m => m.tahunAkademik === schedule.tahunAkademik);
+            const nilaiRecord = state.nilaiList.find(n => n.id === schedule.id);
+            return `<form id="nilai-form">
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm text-left">
+                        <thead class="text-xs text-gray-700 uppercase bg-gray-50"><tr>
+                            <th class="px-4 py-2">Nama Mahasiswa</th>
+                            <th class="px-4 py-2 text-center">Tugas (20%)</th>
+                            <th class="px-4 py-2 text-center">UTS (30%)</th>
+                            <th class="px-4 py-2 text-center">UAS (40%)</th>
+                            <th class="px-4 py-2 text-center">Kehadiran (10%)</th>
+                            <th class="px-4 py-2 text-center">Nilai Akhir</th>
+                            <th class="px-4 py-2 text-center">Nilai Huruf</th>
+                        </tr></thead>
+                        <tbody>${students.map(student => {
+                            const myAbsensi = state.absensiList.filter(a => a.scheduleId === schedule.id);
+                            const hadirCount = myAbsensi.filter(a => a.absensiData[student.id] === 'Hadir').length;
+                            const kehadiranScore = Math.round((hadirCount / 16) * 100);
+                            const existingGrade = nilaiRecord?.gradesData?.[student.id];
+                            return `<tr class="border-b student-row" data-studentid="${student.id}">
+                                <td class="px-4 py-2 font-medium">${student.name}</td>
+                                <td><input type="number" name="tugas" min="0" max="100" class="w-20 p-1 border rounded text-center grade-input" value="${existingGrade?.tugas || ''}"></td>
+                                <td><input type="number" name="uts" min="0" max="100" class="w-20 p-1 border rounded text-center grade-input" value="${existingGrade?.uts || ''}"></td>
+                                <td><input type="number" name="uas" min="0" max="100" class="w-20 p-1 border rounded text-center grade-input" value="${existingGrade?.uas || ''}"></td>
+                                <td class="text-center kehadiran-score">${kehadiranScore}</td>
+                                <td class="text-center font-bold nilai-akhir">${existingGrade?.nilaiAkhir || '0.0'}</td>
+                                <td class="text-center font-bold nilai-huruf">${existingGrade?.nilaiHuruf || 'D'}</td>
+                            </tr>`;
+                        }).join('')}</tbody>
+                    </table>
+                </div>
+                <button type="submit" class="mt-6 w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg">Simpan Nilai</button>
+            </form>`;
+        }
+        function NilaiHistoryHTML(mahasiswa) {
+            const mySchedule = state.scheduleList.filter(s => s.tahunAkademik === mahasiswa.tahunAkademik);
+            if(mySchedule.length === 0) return `<p class="text-gray-500">Belum ada jadwal kuliah untuk tahun akademik ini.</p>`;
+
+            return `<div class="space-y-4">${mySchedule.map(schedule => {
+                const mataKuliah = state.mataKuliahList.find(mk => mk.id === schedule.mataKuliahId);
+                const nilaiDoc = state.nilaiList.find(n => n.id === schedule.id);
+                const myGrade = nilaiDoc ? nilaiDoc.gradesData?.[mahasiswa.id] : null;
+                return `<div class="border rounded-lg p-3 text-sm">
+                    <p class="font-bold">${mataKuliah.nama}</p>
+                    ${myGrade ? `<div class="flex justify-between items-center mt-2">
+                        <span>Nilai Akhir: <span class="font-semibold">${myGrade.nilaiAkhir}</span></span>
+                        <span>Nilai Huruf: <span class="font-semibold text-lg ${myGrade.nilaiHuruf === 'A' ? 'text-green-600' : 'text-gray-700'}">${myGrade.nilaiHuruf}</span></span>
+                    </div>` : '<p class="text-xs text-gray-500 mt-1">Nilai belum diinput oleh dosen.</p>'}
+                </div>`;
+            }).join('')}</div>`;
+        }
+        function AbsensiHistoryHTML(mahasiswa) {
+            const mySchedule = state.scheduleList.filter(s => s.tahunAkademik === mahasiswa.tahunAkademik);
+            if (mySchedule.length === 0) return `<p class="text-gray-500">Tidak ada riwayat absensi untuk ditampilkan.</p>`;
+
+            return mySchedule.map(schedule => {
+                const mataKuliah = state.mataKuliahList.find(mk => mk.id === schedule.mataKuliahId);
+                const myAbsensi = state.absensiList.filter(a => a.scheduleId === schedule.id);
+                const summary = { Hadir: 0, Izin: 0, Sakit: 0, Alpa: 0 };
+                myAbsensi.forEach(a => {
+                    const status = a.absensiData[mahasiswa.id];
+                    if (status) summary[status]++;
+                });
+
+                return `<div class="mb-4 border rounded-lg p-3">
+                    <p class="font-bold">${mataKuliah.nama}</p>
+                    <div class="flex space-x-4 text-xs mt-2">
+                        <span class="font-semibold text-green-600">Hadir: ${summary.Hadir}</span>
+                        <span class="font-semibold text-blue-600">Izin: ${summary.Izin}</span>
+                        <span class="font-semibold text-yellow-600">Sakit: ${summary.Sakit}</span>
+                        <span class="font-semibold text-red-600">Alpa: ${summary.Alpa}</span>
+                    </div>
+                </div>`;
+            }).join('');
+        }
+         function SapInputHTML() {
+            const schedule = state.selectedScheduleForAbsensi;
+            const pertemuanKe = document.getElementById('pertemuan-select-sap')?.value || 1;
+            const sapRecord = state.sapList.find(s => s.scheduleId === schedule.id && s.pertemuanKe == pertemuanKe);
+             return `<form id="sap-form" class="space-y-4">
+                    <div><label for="pertemuan-select-sap" class="block text-sm font-medium text-gray-700">Pilih Pertemuan Ke:</label>
+                    <select id="pertemuan-select-sap" class="mt-1 p-2 border rounded-md w-full md:w-1/4">
+                        ${Array.from({length: 16}, (_, i) => `<option value="${i+1}" ${pertemuanKe == i+1 ? 'selected' : ''}>${i+1}</option>`).join('')}
+                    </select></div>
+                    <div><label class="block text-sm font-medium">Tanggal Perkuliahan</label><input type="date" name="tanggalPerkuliahan" value="${sapRecord?.tanggalPerkuliahan || ''}" class="w-full p-2 border rounded" required /></div>
+                    <div><label class="block text-sm font-medium">Capaian Pembelajaran (CPMK)</label><textarea name="cpmk" rows="3" class="w-full p-2 border rounded">${sapRecord?.cpmk || ''}</textarea></div>
+                    <div><label class="block text-sm font-medium">Sub-CPMK</label><textarea name="subCpmk" rows="3" class="w-full p-2 border rounded">${sapRecord?.subCpmk || ''}</textarea></div>
+                    <div><label class="block text-sm font-medium">Materi</label><textarea name="materi" rows="3" class="w-full p-2 border rounded">${sapRecord?.materi || ''}</textarea></div>
+                    <div><label class="block text-sm font-medium">Model Pembelajaran</label><input type="text" name="modelPembelajaran" value="${sapRecord?.modelPembelajaran || ''}" class="w-full p-2 border rounded" /></div>
+                    <div><label class="block text-sm font-medium">Catatan Pengalaman Belajar</label><textarea name="catatanPengalaman" rows="3" class="w-full p-2 border rounded">${sapRecord?.catatanPengalaman || ''}</textarea></div>
+                    <div><label class="block text-sm font-medium">Refleksi</label><textarea name="refleksi" rows="3" class="w-full p-2 border rounded">${sapRecord?.refleksi || ''}</textarea></div>
+                    <button type="submit" class="mt-6 w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg">Simpan SAP</button>
+                </form>`;
+        }
+        function SapRekapHTML() {
+            const schedule = state.selectedScheduleForAbsensi;
+            const mySapRecords = state.sapList.filter(s => s.scheduleId === schedule.id);
+
+            return `<div class="overflow-x-auto">
+                        <table class="w-full text-sm text-left">
+                            <thead class="text-xs text-gray-700 uppercase bg-gray-50">
+                                <tr>
+                                    <th class="px-4 py-2 text-center">P</th>
+                                    <th class="px-4 py-2">Tanggal</th>
+                                    <th class="px-4 py-2">Materi Pembelajaran</th>
+                                    <th class="px-4 py-2">Model Pembelajaran</th>
+                                    <th class="px-4 py-2">Catatan</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${Array.from({length: 16}, (_, i) => {
+                                    const pertemuan = i + 1;
+                                    const sapRecord = mySapRecords.find(s => s.pertemuanKe === pertemuan);
+                                    return `<tr class="border-b">
+                                        <td class="px-4 py-2 font-bold text-center">${pertemuan}</td>
+                                        <td class="px-4 py-2">${sapRecord?.tanggalPerkuliahan || '-'}</td>
+                                        <td class="px-4 py-2">${sapRecord?.materi || '-'}</td>
+                                        <td class="px-4 py-2">${sapRecord?.modelPembelajaran || '-'}</td>
+                                        <td class="px-4 py-2">${sapRecord?.catatanPengalaman || '-'}</td>
+                                    </tr>`;
+                                }).join('')}
+                            </tbody>
+                        </table>
+                    </div>`;
+        }
+        function SapHistoryHTML(mahasiswa) {
+            const mySchedule = state.scheduleList.filter(s => s.tahunAkademik === mahasiswa.tahunAkademik);
+            if (mySchedule.length === 0) return `<p class="text-gray-500">Tidak ada SAP untuk ditampilkan.</p>`;
+            
+            return `<div class="space-y-2">${mySchedule.map(schedule => {
+                const mataKuliah = state.mataKuliahList.find(mk => mk.id === schedule.mataKuliahId);
+                const mySap = state.sapList.filter(s => s.scheduleId === schedule.id).sort((a,b) => a.pertemuanKe - b.pertemuanKe);
+                return `<div>
+                    <button class="sap-accordion-toggle w-full text-left font-bold p-3 bg-gray-100 hover:bg-gray-200 rounded-md" data-target="sap-content-${schedule.id}">${mataKuliah.nama}</button>
+                    <div id="sap-content-${schedule.id}" class="hidden mt-2 ml-4 border-l-2 pl-4">
+                        ${mySap.length > 0 ? mySap.map(sap => `
+                            <div class="mb-3 text-sm"><p class="font-semibold">Pertemuan ${sap.pertemuanKe} (${sap.tanggalPerkuliahan || 'N/A'})</p><p><strong>Materi:</strong> ${sap.materi || '-'}</p></div>
+                        `).join('') : '<p class="text-sm text-gray-500">SAP belum diinput oleh dosen.</p>'}
+                    </div>
+                </div>`
+            }).join('')}</div>`;
         }
         async function initializeAppLogic() {
             try {
@@ -600,6 +1043,18 @@ const firebaseConfig = typeof __firebase_config !== 'undefined'
                         onSnapshot(collection(db, `/artifacts/${appId}/public/data/jadwal_kuliah`), (snapshot) => {
                             const schedules = []; snapshot.forEach(doc => schedules.push({ id: doc.id, ...doc.data() }));
                             state.scheduleList = schedules.sort((a,b) => a.hari.localeCompare(b.hari)); state.loadingSchedule = false; render();
+                        });
+                        onSnapshot(collection(db, `/artifacts/${appId}/public/data/absensi`), (snapshot) => {
+                            const absensi = []; snapshot.forEach(doc => absensi.push({ id: doc.id, ...doc.data() }));
+                            state.absensiList = absensi; state.loadingAbsensi = false; render();
+                        });
+                        onSnapshot(collection(db, `/artifacts/${appId}/public/data/nilai_mahasiswa`), (snapshot) => {
+                            const nilai = []; snapshot.forEach(doc => nilai.push({ id: doc.id, ...doc.data() }));
+                            state.nilaiList = nilai; state.loadingNilai = false; render();
+                        });
+                        onSnapshot(collection(db, `/artifacts/${appId}/public/data/sap`), (snapshot) => {
+                            const sap = []; snapshot.forEach(doc => sap.push({ id: doc.id, ...doc.data() }));
+                            state.sapList = sap; state.loadingSap = false; render();
                         });
                         onSnapshot(doc(db, `/artifacts/${appId}/public/data/settings`, 'app_config'), (docSnap) => {
                             state.activeAcademicYear = docSnap.exists() ? docSnap.data().activeAcademicYear : null; state.loadingSettings = false; render();
