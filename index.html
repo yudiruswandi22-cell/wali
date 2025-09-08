@@ -39,6 +39,7 @@
                 // Pastikan semua properti konfigurasi Firebase Anda ada di sini
             };
 
+
         // --- ID Aplikasi ---
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'perwalian-stai-sukabumi';
         
@@ -75,18 +76,34 @@
             absensiList: [],
             nilaiList: [],
             sapList: [],
+            krsSubmissionsList: [],
+            surveiQuestions: [
+                { id: 'q1', questionText: 'Dosen datang tepat waktu.' },
+                { id: 'q2', questionText: 'Referensi yang digunakan dosen up to date.' },
+                { id: 'q3', questionText: 'Dosen obyektif terhadap pemberian nilai.' },
+                { id: 'q4', questionText: 'Kesesuaian nilai yang diberikan dengan hasil belajar.' },
+                { id: 'q5', questionText: 'Kemampuan menghidupkan suasana kelas.' },
+                { id: 'q6', questionText: 'Kejelasan penyampaian materi dan jawaban terhadap pertanyaan di kelas.' },
+                { id: 'q7', questionText: 'Pemanfaatan media dan teknologi pembelajaran.' },
+                { id: 'q8', questionText: 'Keanekaragaman cara pengukuran hasil belajar.' },
+                { id: 'q9', questionText: 'Pemberian umpan balik terhadap tugas.' },
+                { id: 'q10', questionText: 'Kesesuaian materi ujian dan/atau tugas dengan tujuan mata kuliah.' }
+            ],
+            surveiResponses: [],
             loadingUsers: true,
             loadingMataKuliah: true,
             loadingSchedule: true,
             loadingAbsensi: true,
             loadingNilai: true,
             loadingSap: true,
+            loadingKrs: true,
+            loadingSurvei: true,
             notification: null,
             modal: { isOpen: false, type: '', data: null },
             selectedStudentId: null,
             selectedScheduleForAbsensi: null,
-            selectedLoginUser: null, // User dipilih sebelum verifikasi NIM/NIDN
-            absensiView: 'input', // 'input', 'rekap', 'nilai', 'sap', 'rekap_sap'
+            selectedLoginUser: null,
+            absensiView: 'input',
             academicYears: [],
             activeAcademicYear: null,
             loadingSettings: true,
@@ -101,6 +118,7 @@
                 <main class="flex-grow flex flex-col">${renderContent()}</main>
                 ${AppFooterHTML()}
                 ${NotificationComponentHTML(state.notification)}
+                ${state.modal.isOpen ? ModalHTML() : ''}
             `;
             appContainer.innerHTML = contentHTML;
             attachEventListeners();
@@ -108,7 +126,7 @@
         }
         
         function renderContent() {
-             if (!state.isAuthReady || state.loadingUsers || state.loadingSettings || state.loadingMataKuliah || state.loadingSchedule || state.loadingAbsensi || state.loadingNilai || state.loadingSap) {
+             if (!state.isAuthReady || state.loadingUsers || state.loadingSettings || state.loadingMataKuliah || state.loadingSchedule || state.loadingAbsensi || state.loadingNilai || state.loadingSap || state.loadingSurvei || state.loadingKrs) {
                 return `<div class="text-center p-10 flex-grow flex items-center justify-center">Memuat data...</div>`;
             }
 
@@ -174,7 +192,7 @@
             const loginSearchInput = document.getElementById('login-search-input');
             if(loginSearchInput) {
                 loginSearchInput.addEventListener('input', handleLoginSearch);
-                handleLoginSearch({ target: { value: '' } }); // Panggil sekali untuk menampilkan semua user
+                handleLoginSearch({ target: { value: '' } });
             }
 
             const finalLoginForm = document.getElementById('final-login-form');
@@ -235,6 +253,12 @@
                     }
                 });
             });
+            
+            const confirmDeleteBtn = document.getElementById('confirm-delete-btn');
+            if (confirmDeleteBtn) confirmDeleteBtn.addEventListener('click', handleConfirmDelete);
+            const confirmCancelBtn = document.getElementById('confirm-cancel-btn');
+            if(confirmCancelBtn) confirmCancelBtn.addEventListener('click', closeModal);
+
 
             attachPerwalianListeners();
             attachAbsensiListeners();
@@ -252,36 +276,29 @@
             if (approveKrsBtn) approveKrsBtn.addEventListener('click', handleApproveKrs);
             const rejectKrsBtn = document.getElementById('reject-krs-btn');
             if (rejectKrsBtn) rejectKrsBtn.addEventListener('click', handleRejectKrs);
+
+            document.querySelectorAll('.fill-survei-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const scheduleId = e.currentTarget.dataset.scheduleid;
+                    const schedule = state.scheduleList.find(s => s.id === scheduleId);
+                    openModal('fillSurvei', schedule);
+                });
+            });
+
         }
 
         function attachAbsensiListeners() {
             const absensiForm = document.getElementById('absensi-form');
             if(absensiForm) absensiForm.addEventListener('submit', handleSaveAbsensi);
             const pertemuanSelect = document.getElementById('pertemuan-select');
-            if(pertemuanSelect) pertemuanSelect.addEventListener('change', () => {
-                render();
-            });
+            if(pertemuanSelect) pertemuanSelect.addEventListener('change', () => { render(); });
 
-            document.getElementById('tab-input-absensi')?.addEventListener('click', () => {
-                state.absensiView = 'input';
-                render();
-            });
-             document.getElementById('tab-rekap-absensi')?.addEventListener('click', () => {
-                state.absensiView = 'rekap';
-                render();
-            });
-            document.getElementById('tab-input-nilai')?.addEventListener('click', () => {
-                state.absensiView = 'nilai';
-                render();
-            });
-             document.getElementById('tab-input-sap')?.addEventListener('click', () => {
-                state.absensiView = 'sap';
-                render();
-            });
-            document.getElementById('tab-rekap-sap')?.addEventListener('click', () => {
-                state.absensiView = 'rekap_sap';
-                render();
-            });
+            document.getElementById('tab-input-absensi')?.addEventListener('click', () => { state.absensiView = 'input'; render(); });
+            document.getElementById('tab-rekap-absensi')?.addEventListener('click', () => { state.absensiView = 'rekap'; render(); });
+            document.getElementById('tab-input-nilai')?.addEventListener('click', () => { state.absensiView = 'nilai'; render(); });
+            document.getElementById('tab-input-sap')?.addEventListener('click', () => { state.absensiView = 'sap'; render(); });
+            document.getElementById('tab-rekap-sap')?.addEventListener('click', () => { state.absensiView = 'rekap_sap'; render(); });
+            document.getElementById('tab-feedback-survei')?.addEventListener('click', () => { state.absensiView = 'feedback'; render(); });
 
             document.getElementById('nilai-form')?.addEventListener('submit', handleSaveNilai);
             document.querySelectorAll('.grade-input').forEach(input => {
@@ -292,6 +309,7 @@
             });
 
             document.getElementById('sap-form')?.addEventListener('submit', handleSaveSap);
+            document.getElementById('survei-form')?.addEventListener('submit', handleSaveSurvei);
         }
         
         // --- HANDLER FUNCTIONS ---
@@ -448,30 +466,27 @@
         }
 
 
-        async function handleDeleteUser(userId, role) {
-            if (confirm(`Apakah Anda yakin ingin menghapus ${role} ini?`)) {
-                try {
-                    await deleteDoc(doc(db, `/artifacts/${appId}/public/data/users`, userId));
-                    setNotification({ type: 'success', message: `Data ${role} berhasil dihapus.` });
-                } catch (error) { setNotification({ type: 'error', message: `Gagal menghapus data ${role}.` }); }
-            }
+        function handleDeleteUser(userId, role) {
+            openModal('confirmDelete', { id: userId, collection: 'users', message: `Apakah Anda yakin ingin menghapus ${role} ini?` });
         }
-
-        async function handleDeleteCourse(courseId) {
-             if (confirm(`Apakah Anda yakin ingin menghapus mata kuliah ini?`)) {
-                try {
-                    await deleteDoc(doc(db, `/artifacts/${appId}/public/data/mata_kuliah`, courseId));
-                    setNotification({ type: 'success', message: `Mata kuliah berhasil dihapus.` });
-                } catch (error) { setNotification({ type: 'error', message: `Gagal menghapus mata kuliah.` }); }
-            }
+        function handleDeleteCourse(courseId) {
+            openModal('confirmDelete', { id: courseId, collection: 'mata_kuliah', message: 'Apakah Anda yakin ingin menghapus mata kuliah ini?' });
         }
-
-        async function handleDeleteSchedule(scheduleId) {
-             if (confirm(`Apakah Anda yakin ingin menghapus jadwal ini?`)) {
-                try {
-                    await deleteDoc(doc(db, `/artifacts/${appId}/public/data/jadwal_kuliah`, scheduleId));
-                    setNotification({ type: 'success', message: `Jadwal berhasil dihapus.` });
-                } catch (error) { setNotification({ type: 'error', message: `Gagal menghapus jadwal.` }); }
+        function handleDeleteSchedule(scheduleId) {
+            openModal('confirmDelete', { id: scheduleId, collection: 'jadwal_kuliah', message: 'Apakah Anda yakin ingin menghapus jadwal ini?' });
+        }
+       
+        async function handleConfirmDelete() {
+            const { id, collection } = state.modal.data;
+            if (!id || !collection) return;
+            try {
+                await deleteDoc(doc(db, `/artifacts/${appId}/public/data/${collection}`, id));
+                setNotification({ type: 'success', message: `Data berhasil dihapus.` });
+            } catch (error) {
+                console.error("Error deleting document:", error);
+                setNotification({ type: 'error', message: `Gagal menghapus data.` });
+            } finally {
+                closeModal();
             }
         }
 
@@ -629,6 +644,49 @@
             }
         }
         
+         async function handleSaveSurvei(e) {
+            e.preventDefault();
+            const form = e.target;
+            const scheduleId = form.dataset.scheduleid;
+            const schedule = state.scheduleList.find(s => s.id === scheduleId);
+            if (!schedule) return;
+
+            const responses = [];
+            let allAnswered = true;
+            state.surveiQuestions.forEach(q => {
+                const ratingInput = form.querySelector(`input[name="rating-${q.id}"]:checked`);
+                if (ratingInput) {
+                    responses.push({ questionId: q.id, questionText: q.questionText, rating: Number(ratingInput.value) });
+                } else {
+                    allAnswered = false;
+                }
+            });
+
+            if (!allAnswered) {
+                setNotification({ type: 'error', message: 'Harap isi semua pertanyaan survei.' });
+                return;
+            }
+
+            const submission = {
+                scheduleId: schedule.id,
+                mataKuliahId: schedule.mataKuliahId,
+                dosenId: schedule.dosenId,
+                mahasiswaId: state.currentUser.id,
+                tahunAkademik: state.currentUser.tahunAkademik,
+                submittedAt: new Date().toISOString(),
+                responses: responses
+            };
+            const responseDocId = `${schedule.id}_${state.currentUser.id}`;
+            try {
+                await setDoc(doc(db, `/artifacts/${appId}/public/data/survei_responses`, responseDocId), submission);
+                setNotification({ type: 'success', message: 'Terima kasih, survei Anda berhasil dikirim.' });
+                closeModal();
+            } catch(error) {
+                console.error("Error submitting survey:", error);
+                setNotification({ type: 'error', message: 'Gagal mengirim survei.' });
+            }
+        }
+        
         function updateFinalGrade(studentId) {
             const row = document.querySelector(`.student-row[data-studentid="${studentId}"]`);
             if (!row) return;
@@ -704,7 +762,7 @@
                 <div class="bg-white p-6 rounded-lg shadow-lg"><div class="flex justify-between items-center mb-4"><h3 class="text-xl font-semibold text-gray-700">Data Mata Kuliah</h3><button id="add-mk-btn" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg">Tambah MK</button></div><div class="overflow-x-auto"><table class="w-full text-sm text-left text-gray-500"><thead class="text-xs text-gray-700 uppercase bg-gray-50"><tr><th class="px-6 py-3">Kode</th><th class="px-6 py-3">Nama Mata Kuliah</th><th class="px-6 py-3">SKS</th><th class="px-6 py-3">Prasyarat</th><th class="px-6 py-3">T.A.</th><th class="px-6 py-3">Aksi</th></tr></thead><tbody>${filteredMataKuliah.map(mk => `<tr class="bg-white border-b"><td class="px-6 py-4 font-medium text-gray-900">${mk.kode}</td><td class="px-6 py-4">${mk.nama}</td><td class="px-6 py-4">${mk.sks}</td><td class="px-6 py-4">${mk.prasyarat || '-'}</td><td class="px-6 py-4">${academicYears.find(y=>y.id===mk.tahunAkademik)?.name}</td><td class="px-6 py-4 space-x-2"><button data-id="${mk.id}" class="edit-mk-btn font-medium text-blue-600 hover:underline">Edit</button><button data-id="${mk.id}" class="delete-mk-btn font-medium text-red-600 hover:underline">Hapus</button></td></tr>`).join('')}</tbody></table></div></div>
                 <div class="bg-white p-6 rounded-lg shadow-lg"><div class="flex justify-between items-center mb-4"><h3 class="text-xl font-semibold text-gray-700">Data Dosen Wali</h3><button id="add-dosen-btn" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg">Tambah Dosen</button></div><div class="overflow-x-auto"><table class="w-full text-sm text-left text-gray-500"><thead class="text-xs text-gray-700 uppercase bg-gray-50"><tr><th class="px-6 py-3">Nama</th><th class="px-6 py-3">NIDN</th><th class="px-6 py-3">Jabatan</th><th class="px-6 py-3">T.A.</th><th class="px-6 py-3">Aksi</th></tr></thead><tbody>${filteredDosen.map(d => `<tr class="bg-white border-b"><td class="px-6 py-4 font-medium text-gray-900">${d.name}</td><td class="px-6 py-4">${d.nidn}</td><td class="px-6 py-4">${d.jabatan}</td><td class="px-6 py-4">${academicYears.find(y=>y.id===d.tahunAkademik)?.name}</td><td class="px-6 py-4 space-x-2"><button data-id="${d.id}" class="edit-dosen-btn font-medium text-blue-600 hover:underline">Edit</button><button data-id="${d.id}" class="delete-dosen-btn font-medium text-red-600 hover:underline">Hapus</button></td></tr>`).join('')}</tbody></table></div></div>
                 <div class="bg-white p-6 rounded-lg shadow-lg"><div class="flex justify-between items-center mb-4"><h3 class="text-xl font-semibold text-gray-700">Data Mahasiswa</h3><button id="add-mhs-btn" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg">Tambah Mahasiswa</button></div><div class="overflow-x-auto"><table class="w-full text-sm text-left text-gray-500"><thead class="text-xs text-gray-700 uppercase bg-gray-50"><tr><th class="px-6 py-3">Nama</th><th class="px-6 py-3">NIM</th><th class="px-6 py-3">Prodi</th><th class="px-6 py-3">Semester</th><th class="px-6 py-3">T.A.</th><th class="px-6 py-3">Dosen Wali</th><th class="px-6 py-3">Aksi</th></tr></thead><tbody>${filteredMahasiswa.map(m => `<tr class="bg-white border-b"><td class="px-6 py-4 font-medium text-gray-900">${m.name}</td><td class="px-6 py-4">${m.nim}</td><td class="px-6 py-4">${m.prodi}</td><td class="px-6 py-4">${m.semester}</td><td class="px-6 py-4">${academicYears.find(y=>y.id===m.tahunAkademik)?.name}</td><td class="px-6 py-4">${allUsers[m.lecturerId]?.name || 'N/A'}</td><td class="px-6 py-4 space-x-2"><button data-id="${m.id}" class="edit-mhs-btn font-medium text-blue-600 hover:underline">Edit</button><button data-id="${m.id}" class="delete-mhs-btn font-medium text-red-600 hover:underline">Hapus</button></td></tr>`).join('')}</tbody></table></div></div>
-            </div> ${state.modal.isOpen ? ModalHTML() : ''}`;
+            </div>`;
         }
         function DosenDashboardHTML(user, mahasiswa) {
             const mahasiswaBinaan = mahasiswa.filter(m => m.lecturerId === user.id);
@@ -719,7 +777,7 @@
         function ModalHTML() {
             const { type, data } = state.modal;
             const { dosenList, mataKuliahList, academicYears } = state;
-            const title = { addDosen: 'Tambah Dosen Wali', editDosen: 'Edit Data Dosen', addMhs: 'Tambah Mahasiswa', editMhs: 'Edit Data Mahasiswa', addMk: 'Tambah Mata Kuliah', editMk: 'Edit Mata Kuliah', addSchedule: 'Tambah Jadwal Kuliah', editSchedule: 'Edit Jadwal Kuliah'}[type];
+            const title = { addDosen: 'Tambah Dosen Wali', editDosen: 'Edit Data Dosen', addMhs: 'Tambah Mahasiswa', editMhs: 'Edit Data Mahasiswa', addMk: 'Tambah Mata Kuliah', editMk: 'Edit Mata Kuliah', addSchedule: 'Tambah Jadwal Kuliah', editSchedule: 'Edit Jadwal Kuliah', fillSurvei: 'Isi Survei Kepuasan Dosen'}[type];
             let formContent = '';
             const academicYearsOptions = academicYears.map(y => `<option value="${y.id}" ${data?.tahunAkademik === y.id ? 'selected' : ''}>${y.name}</option>`).join('');
             if (type.includes('Dosen')) {
@@ -733,7 +791,32 @@
                  const dosenOptions = dosenList.map(d => `<option value="${d.id}" ${data?.dosenId === d.id ? 'selected' : ''}>${d.name}</option>`).join('');
                  const hariOptions = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'].map(h => `<option value="${h}" ${data?.hari === h ? 'selected' : ''}>${h}</option>`).join('');
                  formContent = `<div><label class="block text-sm font-medium">Tahun Akademik</label><select name="tahunAkademik" class="w-full p-2 border rounded" required><option value="" disabled selected>-- Pilih --</option>${academicYearsOptions}</select></div><div><label class="block text-sm font-medium">Mata Kuliah</label><select name="mataKuliahId" class="w-full p-2 border rounded" required><option value="" disabled selected>-- Pilih --</option>${mataKuliahOptions}</select></div><div><label class="block text-sm font-medium">Dosen Pengampu</label><select name="dosenId" class="w-full p-2 border rounded" required><option value="" disabled selected>-- Pilih --</option>${dosenOptions}</select></div><div><label class="block text-sm font-medium">Hari</label><select name="hari" class="w-full p-2 border rounded" required><option value="" disabled selected>-- Pilih --</option>${hariOptions}</select></div><div class="grid grid-cols-2 gap-4"><div><label class="block text-sm font-medium">Jam Mulai</label><input type="time" name="jamMulai" value="${data?.jamMulai || ''}" class="w-full p-2 border rounded" required /></div><div><label class="block text-sm font-medium">Jam Selesai</label><input type="time" name="jamSelesai" value="${data?.jamSelesai || ''}" class="w-full p-2 border rounded" required /></div></div><div><label class="block text-sm font-medium">Ruangan</label><input type="text" name="ruangan" value="${data?.ruangan || ''}" class="w-full p-2 border rounded" required /></div>`;
+            } else if (type === 'fillSurvei') {
+                 formContent = `<div class="space-y-4">${state.surveiQuestions.map((q, index) => `
+                    <div>
+                        <p class="font-medium text-sm mb-2">${index + 1}. ${q.questionText}</p>
+                        <div class="flex justify-around items-center">
+                            <label class="flex flex-col items-center text-xs"><input type="radio" name="rating-${q.id}" value="1" class="h-4 w-4">1</label>
+                            <label class="flex flex-col items-center text-xs"><input type="radio" name="rating-${q.id}" value="2" class="h-4 w-4">2</label>
+                            <label class="flex flex-col items-center text-xs"><input type="radio" name="rating-${q.id}" value="3" class="h-4 w-4">3</label>
+                            <label class="flex flex-col items-center text-xs"><input type="radio" name="rating-${q.id}" value="4" class="h-4 w-4">4</label>
+                            <label class="flex flex-col items-center text-xs"><input type="radio" name="rating-${q.id}" value="5" class="h-4 w-4">5</label>
+                        </div>
+                    </div>`).join('')}</div>`;
+                 return `<div id="modal-backdrop" class="fixed inset-0 bg-black bg-opacity-50 z-50 flex justify-center items-center p-4"><div class="bg-white p-6 rounded-lg shadow-xl w-full max-w-lg relative max-h-full overflow-y-auto"><button id="modal-close-btn" class="absolute top-2 right-2 text-gray-500 hover:text-gray-800 text-2xl">&times;</button><form id="survei-form" data-scheduleid="${data.id}"><h3 class="text-xl font-semibold">${title}</h3><p class="text-sm text-gray-500 mb-4">MK: ${state.mataKuliahList.find(mk => mk.id === data.mataKuliahId)?.nama}</p>${formContent}<button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg mt-4">Kirim Survei</button></form></div></div>`;
+            } else if (type === 'confirmDelete') {
+                return `<div id="modal-backdrop" class="fixed inset-0 bg-black bg-opacity-50 z-50 flex justify-center items-center p-4">
+                    <div class="bg-white p-6 rounded-lg shadow-xl w-full max-w-md relative">
+                        <h3 class="text-xl font-semibold mb-4">Konfirmasi Penghapusan</h3>
+                        <p>${data.message}</p>
+                        <div class="flex justify-end gap-4 mt-6">
+                            <button type="button" id="confirm-cancel-btn" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-bold py-2 px-4 rounded-lg">Batal</button>
+                            <button type="button" id="confirm-delete-btn" class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg">Ya, Hapus</button>
+                        </div>
+                    </div>
+                </div>`;
             }
+
             return `<div id="modal-backdrop" class="fixed inset-0 bg-black bg-opacity-50 z-50 flex justify-center items-center p-4"><div class="bg-white p-6 rounded-lg shadow-xl w-full max-w-lg relative max-h-full overflow-y-auto"><button id="modal-close-btn" class="absolute top-2 right-2 text-gray-500 hover:text-gray-800 text-2xl">&times;</button><form id="user-form" data-type="${type}" data-id="${data?.id || ''}" class="space-y-4"><h3 class="text-xl font-semibold">${title}</h3>${formContent}<button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg">Simpan</button></form></div></div>`;
         }
         function PerwalianChannelHTML(user, otherUserId, allUsers) {
@@ -762,19 +845,22 @@
                     attachPerwalianListeners();
                 }
             });
-            return `<div class="container mx-auto p-4 flex flex-col h-full" style="max-height: calc(100vh - 120px);">
+            return `<div class="container mx-auto p-4">
                 <div class="flex justify-between items-center mb-4"><h2 class="text-xl md:text-2xl font-bold text-gray-800">${isDosen ? `Perwalian dengan ${otherUserName}` : 'Dashboard Mahasiswa'}</h2><button id="back-btn" class="bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg">${isDosen ? 'Pilih Mahasiswa Lain' : 'Keluar'}</button></div>
-                ${!isDosen ? `<div class="bg-white p-4 rounded-lg shadow-md mb-6"><h3 class="text-lg font-semibold text-gray-800 mb-2">${mahasiswa.name}</h3><div class="grid grid-cols-2 gap-x-4 gap-y-1 text-sm text-gray-600"><div><strong>NIM:</strong> ${mahasiswa.nim}</div><div><strong>Semester:</strong> ${mahasiswa.semester}</div><div class="col-span-2"><strong>Tahun Akademik:</strong> ${tahunAkademikNama}</div></div></div>` : ''}
-                <div class="flex-grow grid grid-cols-1 lg:grid-cols-2 gap-6 overflow-hidden">
-                    <div class="bg-white p-6 rounded-lg shadow-lg flex flex-col overflow-y-auto"><h3 class="text-xl font-semibold text-gray-800 border-b pb-2 mb-4">Kartu Rencana Studi (KRS)</h3><div id="krs-section-container"><div class="text-center text-gray-400">Memuat data KRS...</div></div></div>
-                    <div class="bg-white p-6 rounded-lg shadow-lg flex flex-col overflow-y-auto"><h3 class="text-xl font-semibold text-gray-800 border-b pb-2 mb-4">Diskusi Perwalian</h3><div id="chat-section-container"><div class="text-center text-gray-400">Memuat percakapan...</div></div></div>
+                <div class="space-y-6">
+                ${!isDosen ? `<div class="bg-white p-4 rounded-lg shadow-md"><h3 class="text-lg font-semibold text-gray-800 mb-2">${mahasiswa.name}</h3><div class="grid grid-cols-2 gap-x-4 gap-y-1 text-sm text-gray-600"><div><strong>NIM:</strong> ${mahasiswa.nim}</div><div><strong>Semester:</strong> ${mahasiswa.semester}</div><div class="col-span-2"><strong>Tahun Akademik:</strong> ${tahunAkademikNama}</div></div></div>` : ''}
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div class="bg-white p-6 rounded-lg shadow-lg flex flex-col"><h3 class="text-xl font-semibold text-gray-800 border-b pb-2 mb-4">Kartu Rencana Studi (KRS)</h3><div id="krs-section-container"><div class="text-center text-gray-400">Memuat data KRS...</div></div></div>
+                    <div class="bg-white p-6 rounded-lg shadow-lg flex flex-col"><h3 class="text-xl font-semibold text-gray-800 border-b pb-2 mb-4">Diskusi Perwalian</h3><div id="chat-section-container"><div class="text-center text-gray-400">Memuat percakapan...</div></div></div>
                 </div>
-                ${!isDosen ? `<div class="grid grid-cols-1 md:grid-cols-3 gap-6 mt-6">
-                    <div class="md:col-span-2 bg-white p-6 rounded-lg shadow-lg overflow-y-auto"><h3 class="text-xl font-semibold text-gray-800 border-b pb-2 mb-4">Nilai Mata Kuliah</h3>${NilaiHistoryHTML(mahasiswa)}</div>
-                    <div class="bg-white p-6 rounded-lg shadow-lg overflow-y-auto"><h3 class="text-xl font-semibold text-gray-800 border-b pb-2 mb-4">Riwayat Absensi</h3>${AbsensiHistoryHTML(mahasiswa)}</div>
+                ${!isDosen ? `<div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div class="md:col-span-2 bg-white p-6 rounded-lg shadow-lg"><h3 class="text-xl font-semibold text-gray-800 border-b pb-2 mb-4">Nilai Mata Kuliah</h3>${NilaiHistoryHTML(mahasiswa)}</div>
+                    <div class="bg-white p-6 rounded-lg shadow-lg"><h3 class="text-xl font-semibold text-gray-800 border-b pb-2 mb-4">Riwayat Absensi</h3>${AbsensiHistoryHTML(mahasiswa)}</div>
                 </div>` : ''}
-                ${!isDosen ? `<div class="bg-white p-6 rounded-lg shadow-lg mt-6 overflow-y-auto"><h3 class="text-xl font-semibold text-gray-800 border-b pb-2 mb-4">Rencana Perkuliahan (SAP)</h3>${SapHistoryHTML(mahasiswa)}</div>` : ''}
-                ${!isDosen && jadwalKuliah.length > 0 ? `<div class="bg-white p-6 rounded-lg shadow-lg mt-6 overflow-y-auto"><h3 class="text-xl font-semibold text-gray-800 border-b pb-2 mb-4">Jadwal Kuliah (T.A. ${tahunAkademikNama})</h3><div class="overflow-x-auto"><table class="w-full text-sm text-left text-gray-500"><thead class="text-xs text-gray-700 uppercase bg-gray-50"><tr><th class="px-4 py-2">Hari</th><th class="px-4 py-2">Waktu</th><th class="px-4 py-2">Mata Kuliah</th><th class="px-4 py-2">Dosen</th><th class="px-4 py-2">Ruang</th></tr></thead><tbody>${jadwalKuliah.map(s => `<tr class="border-b"><td class="px-4 py-2">${s.hari}</td><td class="px-4 py-2">${s.jamMulai}-${s.jamSelesai}</td><td class="px-4 py-2">${state.mataKuliahList.find(mk => mk.id === s.mataKuliahId)?.nama || '-'}</td><td class="px-4 py-2">${state.dosenList.find(d => d.id === s.dosenId)?.name || '-'}</td><td class="px-4 py-2">${s.ruangan}</td></tr>`).join('')}</tbody></table></div></div>` : ''}
+                ${!isDosen ? `<div class="bg-white p-6 rounded-lg shadow-lg"><h3 class="text-xl font-semibold text-gray-800 border-b pb-2 mb-4">Survei Kepuasan Dosen Pengajar</h3>${SurveiStudentHTML(mahasiswa)}</div>` : ''}
+                ${!isDosen ? `<div class="bg-white p-6 rounded-lg shadow-lg"><h3 class="text-xl font-semibold text-gray-800 border-b pb-2 mb-4">Rencana Perkuliahan (SAP)</h3>${SapHistoryHTML(mahasiswa)}</div>` : ''}
+                ${!isDosen && jadwalKuliah.length > 0 ? `<div class="bg-white p-6 rounded-lg shadow-lg"><h3 class="text-xl font-semibold text-gray-800 border-b pb-2 mb-4">Jadwal Kuliah (T.A. ${tahunAkademikNama})</h3><div class="overflow-x-auto"><table class="w-full text-sm text-left text-gray-500"><thead class="text-xs text-gray-700 uppercase bg-gray-50"><tr><th class="px-4 py-2">Hari</th><th class="px-4 py-2">Waktu</th><th class="px-4 py-2">Mata Kuliah</th><th class="px-4 py-2">Dosen</th><th class="px-4 py-2">Ruang</th></tr></thead><tbody>${jadwalKuliah.map(s => `<tr class="border-b"><td class="px-4 py-2">${s.hari}</td><td class="px-4 py-2">${s.jamMulai}-${s.jamSelesai}</td><td class="px-4 py-2">${state.mataKuliahList.find(mk => mk.id === s.mataKuliahId)?.nama || '-'}</td><td class="px-4 py-2">${state.dosenList.find(d => d.id === s.dosenId)?.name || '-'}</td><td class="px-4 py-2">${s.ruangan}</td></tr>`).join('')}</tbody></table></div></div>` : ''}
+                </div>
             </div>`;
         }
         function KrsSectionHTML(user, krsSubmission, availableCourses) {
@@ -803,6 +889,7 @@
                 case 'nilai': content = NilaiInputHTML(); break;
                 case 'sap': content = SapInputHTML(); break;
                 case 'rekap_sap': content = SapRekapHTML(); break;
+                case 'feedback': content = FeedbackSurveiHTML(); break;
                 default: content = AbsensiInputHTML();
             }
             return `<div class="container mx-auto p-4"><div class="flex justify-between items-center mb-4"><h2 class="text-2xl font-bold text-gray-800">Detail Kelas: ${mataKuliah.nama}</h2><button id="back-btn" class="bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg">Kembali</button></div>
@@ -814,6 +901,7 @@
                         <button id="tab-input-nilai" class="py-2 px-4 font-semibold whitespace-nowrap ${state.absensiView === 'nilai' ? 'border-b-2 border-blue-500 text-blue-600' : 'text-gray-500'}">Input Nilai</button>
                         <button id="tab-input-sap" class="py-2 px-4 font-semibold whitespace-nowrap ${state.absensiView === 'sap' ? 'border-b-2 border-blue-500 text-blue-600' : 'text-gray-500'}">Input SAP</button>
                         <button id="tab-rekap-sap" class="py-2 px-4 font-semibold whitespace-nowrap ${state.absensiView === 'rekap_sap' ? 'border-b-2 border-blue-500 text-blue-600' : 'text-gray-500'}">Rekap SAP</button>
+                        <button id="tab-feedback-survei" class="py-2 px-4 font-semibold whitespace-nowrap ${state.absensiView === 'feedback' ? 'border-b-2 border-blue-500 text-blue-600' : 'text-gray-500'}">Feedback Survei</button>
                     </nav>
                 </div>
                 ${content}
@@ -821,7 +909,7 @@
         }
         function AbsensiInputHTML() {
             const schedule = state.selectedScheduleForAbsensi;
-            const students = state.mahasiswaList.filter(m => m.tahunAkademik === schedule.tahunAkademik);
+            const students = state.mahasiswaList.filter(m => state.krsSubmissionsList.some(krs => krs.status === 'Disetujui' && krs.mahasiswaId === m.id && krs.courses.some(c => c.id === schedule.mataKuliahId)));
             const pertemuanKe = document.getElementById('pertemuan-select')?.value || 1;
             const absensiRecord = state.absensiList.find(a => a.scheduleId === schedule.id && a.pertemuanKe == pertemuanKe);
              return `<form id="absensi-form">
@@ -845,7 +933,7 @@
         }
         function AbsensiRekapHTML() {
             const schedule = state.selectedScheduleForAbsensi;
-            const students = state.mahasiswaList.filter(m => m.tahunAkademik === schedule.tahunAkademik);
+            const students = state.mahasiswaList.filter(m => state.krsSubmissionsList.some(krs => krs.status === 'Disetujui' && krs.mahasiswaId === m.id && krs.courses.some(c => c.id === schedule.mataKuliahId)));
             const attendanceForThisSchedule = state.absensiList.filter(a => a.scheduleId === schedule.id);
             const statusColors = { H: 'bg-green-100 text-green-800', I: 'bg-blue-100 text-blue-800', S: 'bg-yellow-100 text-yellow-800', A: 'bg-red-100 text-red-800' };
 
@@ -875,7 +963,7 @@
         }
          function NilaiInputHTML() {
             const schedule = state.selectedScheduleForAbsensi;
-            const students = state.mahasiswaList.filter(m => m.tahunAkademik === schedule.tahunAkademik);
+            const students = state.mahasiswaList.filter(m => state.krsSubmissionsList.some(krs => krs.status === 'Disetujui' && krs.mahasiswaId === m.id && krs.courses.some(c => c.id === schedule.mataKuliahId)));
             const nilaiRecord = state.nilaiList.find(n => n.id === schedule.id);
             return `<form id="nilai-form">
                 <div class="overflow-x-auto">
@@ -1017,6 +1105,62 @@
                 </div>`
             }).join('')}</div>`;
         }
+         function SurveiStudentHTML(mahasiswa) {
+            const mySchedule = state.scheduleList.filter(s => s.tahunAkademik === mahasiswa.tahunAkademik);
+            if (mySchedule.length === 0) return `<p class="text-gray-500">Tidak ada mata kuliah untuk disurvei.</p>`;
+            return `<div class="space-y-3">${mySchedule.map(schedule => {
+                const mataKuliah = state.mataKuliahList.find(mk => mk.id === schedule.mataKuliahId);
+                const dosen = state.dosenList.find(d => d.id === schedule.dosenId);
+                const isSubmitted = state.surveiResponses.some(r => r.scheduleId === schedule.id && r.mahasiswaId === mahasiswa.id);
+                return `<div class="p-3 border rounded-lg flex justify-between items-center">
+                    <div>
+                        <p class="font-bold">${mataKuliah.nama}</p>
+                        <p class="text-xs text-gray-500">${dosen.name}</p>
+                    </div>
+                    ${isSubmitted 
+                        ? `<span class="text-sm font-semibold text-green-600">Sudah Diisi</span>`
+                        : `<button data-scheduleid="${schedule.id}" class="fill-survei-btn bg-blue-500 text-white text-xs font-bold py-1 px-3 rounded-full hover:bg-blue-600">Isi Survei</button>`
+                    }
+                </div>`;
+            }).join('')}</div>`;
+        }
+        function FeedbackSurveiHTML() {
+            const schedule = state.selectedScheduleForAbsensi;
+            const responsesForThisSchedule = state.surveiResponses.filter(r => r.scheduleId === schedule.id);
+            if(responsesForThisSchedule.length === 0) return `<p class="text-center text-gray-500 py-10">Belum ada mahasiswa yang mengisi survei untuk kelas ini.</p>`;
+
+            const results = {};
+            state.surveiQuestions.forEach(q => {
+                results[q.id] = { text: q.questionText, ratings: [], average: 0 };
+            });
+
+            responsesForThisSchedule.forEach(res => {
+                res.responses.forEach(r => {
+                    if(results[r.questionId]) {
+                        results[r.questionId].ratings.push(r.rating);
+                    }
+                });
+            });
+
+            Object.values(results).forEach(q => {
+                if(q.ratings.length > 0) {
+                    q.average = q.ratings.reduce((a,b) => a+b, 0) / q.ratings.length;
+                }
+            });
+
+            return `<div class="space-y-4">
+                <p class="text-sm text-gray-600">Total Responden: ${responsesForThisSchedule.length}</p>
+                ${Object.values(results).map(q => `
+                <div class="p-3 border rounded-lg">
+                    <p class="font-medium">${q.text}</p>
+                    <div class="flex items-center gap-2 mt-2">
+                        <div class="w-full bg-gray-200 rounded-full h-2.5"><div class="bg-blue-600 h-2.5 rounded-full" style="width: ${q.average / 5 * 100}%"></div></div>
+                        <span class="font-bold text-lg text-blue-700">${q.average.toFixed(1)}</span>
+                    </div>
+                </div>
+                `).join('')}
+            </div>`;
+        }
         async function initializeAppLogic() {
             try {
                 if (!auth.currentUser) {
@@ -1055,6 +1199,14 @@
                         onSnapshot(collection(db, `/artifacts/${appId}/public/data/sap`), (snapshot) => {
                             const sap = []; snapshot.forEach(doc => sap.push({ id: doc.id, ...doc.data() }));
                             state.sapList = sap; state.loadingSap = false; render();
+                        });
+                        onSnapshot(collection(db, `/artifacts/${appId}/public/data/krs_submissions`), (snapshot) => {
+                            const submissions = []; snapshot.forEach(doc => submissions.push({ id: doc.id, ...doc.data() }));
+                            state.krsSubmissionsList = submissions; state.loadingKrs = false; render();
+                        });
+                        onSnapshot(collection(db, `/artifacts/${appId}/public/data/survei_responses`), (snapshot) => {
+                            const responses = []; snapshot.forEach(doc => responses.push({ id: doc.id, ...doc.data() }));
+                            state.surveiResponses = responses; state.loadingSurvei = false; render();
                         });
                         onSnapshot(doc(db, `/artifacts/${appId}/public/data/settings`, 'app_config'), (docSnap) => {
                             state.activeAcademicYear = docSnap.exists() ? docSnap.data().activeAcademicYear : null; state.loadingSettings = false; render();
