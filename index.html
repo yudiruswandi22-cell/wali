@@ -22,7 +22,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, onSnapshot, setDoc, updateDoc, arrayUnion, collection, addDoc, deleteDoc, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, doc, onSnapshot, setDoc, updateDoc, arrayUnion, collection, addDoc, deleteDoc, getDoc, writeBatch } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         
         // --- Konfigurasi Firebase ---
         // PENTING: Jika Anda mem-publish aplikasi ini secara mandiri (di luar environment khusus),
@@ -159,7 +159,7 @@
                 if (prodiChartInstance) {
                     prodiChartInstance.destroy();
                 }
-                const mahasiswaBinaan = state.mahasiswaList.filter(m => m.lecturerId === state.currentUser.id);
+                const mahasiswaBinaan = state.mahasiswaList.filter(m => m.lecturerId === state.currentUser.id && m.tahunAkademik === state.currentUser.tahunAkademik);
                 const paiCount = mahasiswaBinaan.filter(m => m.prodi === 'PAI').length;
                 const hesCount = mahasiswaBinaan.filter(m => m.prodi === 'HES').length;
 
@@ -227,6 +227,9 @@
                 document.querySelectorAll('.delete-schedule-btn').forEach(btn => btn.addEventListener('click', (e) => handleDeleteSchedule(e.currentTarget.dataset.id)));
                 document.getElementById('add-year-form')?.addEventListener('submit', handleAddAcademicYear);
                 document.getElementById('active-year-select')?.addEventListener('change', handleSetActiveAcademicYear);
+                document.getElementById('copy-dosen-btn')?.addEventListener('click', () => openModal('copyData', { type: 'dosen', title: 'Dosen Wali' }));
+                document.getElementById('copy-mhs-btn')?.addEventListener('click', () => openModal('copyData', { type: 'mahasiswa', title: 'Mahasiswa' }));
+                document.getElementById('copy-mk-btn')?.addEventListener('click', () => openModal('copyData', { type: 'mata_kuliah', title: 'Mata Kuliah' }));
             }
             
             const modalCloseBtn = document.getElementById('modal-close-btn');
@@ -258,6 +261,9 @@
             if (confirmDeleteBtn) confirmDeleteBtn.addEventListener('click', handleConfirmDelete);
             const confirmCancelBtn = document.getElementById('confirm-cancel-btn');
             if(confirmCancelBtn) confirmCancelBtn.addEventListener('click', closeModal);
+
+            const copyDataForm = document.getElementById('copy-data-form');
+            if(copyDataForm) copyDataForm.addEventListener('submit', handleCopyDataSubmit);
 
 
             attachPerwalianListeners();
@@ -367,7 +373,12 @@
             if (!resultsContainer) return;
 
             const usersForLogin = { ...state.allUsers, 'admin_001': { id: 'admin_001', name: 'Administrator', role: 'admin' } };
-            const userList = Object.values(usersForLogin);
+            let userList = Object.values(usersForLogin);
+
+            // Filter users based on the active academic year, but always include the admin
+            if (state.activeAcademicYear) {
+                userList = userList.filter(user => user.tahunAkademik === state.activeAcademicYear || user.role === 'admin');
+            }
 
             const filteredUsers = userList.filter(user => user.name.toLowerCase().includes(searchTerm));
 
@@ -707,6 +718,60 @@
             row.querySelector('.nilai-huruf').textContent = nilaiHuruf;
         }
 
+        async function handleCopyDataSubmit(e) {
+            e.preventDefault();
+            const form = e.target;
+            const sourceYearId = form.querySelector('#source-year-select').value;
+            const destinationYearId = state.activeAcademicYear;
+            const dataType = state.modal.data.type;
+            const collectionName = dataType === 'dosen' || dataType === 'mahasiswa' ? 'users' : 'mata_kuliah';
+
+            if (!sourceYearId || !destinationYearId) {
+                setNotification({type: 'error', message: 'Tahun akademik sumber dan tujuan harus dipilih.'});
+                return;
+            }
+            if(sourceYearId === destinationYearId) {
+                 setNotification({type: 'error', message: 'Tahun akademik sumber dan tujuan tidak boleh sama.'});
+                return;
+            }
+
+            try {
+                setNotification({type: 'info', message: `Menyalin data...`});
+
+                const dataToCopy = [];
+                if(dataType === 'dosen') {
+                    dataToCopy.push(...state.dosenList.filter(d => d.tahunAkademik === sourceYearId));
+                } else if (dataType === 'mahasiswa') {
+                    dataToCopy.push(...state.mahasiswaList.filter(m => m.tahunAkademik === sourceYearId));
+                } else if (dataType === 'mata_kuliah') {
+                     dataToCopy.push(...state.mataKuliahList.filter(mk => mk.tahunAkademik === sourceYearId));
+                }
+
+                if(dataToCopy.length === 0) {
+                     setNotification({type: 'error', message: 'Tidak ada data untuk disalin dari tahun akademik sumber.'});
+                     return;
+                }
+
+                const batch = writeBatch(db);
+                dataToCopy.forEach(item => {
+                    const newItem = { ...item };
+                    delete newItem.id; // Hapus ID lama agar Firestore membuat yang baru
+                    newItem.tahunAkademik = destinationYearId;
+                    const newDocRef = doc(collection(db, `/artifacts/${appId}/public/data/${collectionName}`));
+                    batch.set(newDocRef, newItem);
+                });
+
+                await batch.commit();
+                setNotification({type: 'success', message: `Data berhasil disalin ke tahun akademik ${state.academicYears.find(y => y.id === destinationYearId)?.name}.`});
+                closeModal();
+
+            } catch (error) {
+                console.error("Error copying data:", error);
+                setNotification({type: 'error', message: 'Gagal menyalin data.'});
+            }
+
+        }
+
         // --- HTML TEMPLATE FUNCTIONS ---
         function AppHeaderHTML() { return `<header class="bg-green-800 text-white p-4 shadow-md w-full"><div class="container mx-auto flex items-center justify-between"><div class="flex items-center space-x-3"><img src="https://iili.io/KdXnlX2.png" alt="Logo STAI Al-Mas'udiyah" class="h-12 w-12 object-contain"/><h1 class="text-xl md:text-2xl font-bold">SISTEM PERWALIAN</h1></div><span class="text-sm hidden md:block">STAI Al-Mas'udiyah Sukabumi</span></div></header>`; }
         function AppFooterHTML() { return `<footer class="bg-gray-800 text-white text-xs text-center p-4 mt-auto w-full"><p>Sekretariat STAI Al-Mas'udiyah Sukabumi: Jl. Sagaranten Km. 26 Kp. Buni Ayu Desa Kertaangsana Kec. Nyalindung Sukabumi</p><p class="mt-1">Copyright &copy; 2025</p></footer>`; }
@@ -759,13 +824,13 @@
                 <div class="flex justify-between items-center"><h2 class="text-2xl font-bold text-gray-800">Manajemen Data</h2><button id="logout-btn" class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg">Keluar</button></div>
                 <div class="bg-white p-6 rounded-lg shadow-lg"><h3 class="text-xl font-semibold text-gray-700 mb-4">Manajemen Tahun Akademik</h3><div class="grid grid-cols-1 md:grid-cols-2 gap-6"><div><label for="active-year-select" class="block text-sm font-medium text-gray-700">Tampilkan Data Untuk Tahun Akademik</label><select id="active-year-select" class="mt-1 block w-full p-2 border border-gray-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500"><option value="">-- Tampilkan Semua --</option>${academicYears.map(year => `<option value="${year.id}" ${activeAcademicYear === year.id ? 'selected' : ''}>${year.name}</option>`).join('')}</select></div><div><label for="new-year-input" class="block text-sm font-medium text-gray-700">Tambah Tahun Akademik Baru</label><form id="add-year-form" class="mt-1 flex shadow-sm"><input type="text" id="new-year-input" placeholder="Contoh: 2025/2026 Ganjil" class="w-full p-2 border-gray-300 border rounded-l-md focus:ring-green-500 focus:border-green-500" required><button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-r-md">Tambah</button></form></div></div></div>
                 <div class="bg-white p-6 rounded-lg shadow-lg"><div class="flex justify-between items-center mb-4"><h3 class="text-xl font-semibold text-gray-700">Manajemen Jadwal Kuliah</h3><button id="add-schedule-btn" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg">Tambah Jadwal</button></div><div class="overflow-x-auto max-h-96"><table class="w-full text-sm text-left text-gray-500"><thead class="text-xs text-gray-700 uppercase bg-gray-50"><tr><th class="px-6 py-3">Mata Kuliah</th><th class="px-6 py-3">Dosen</th><th class="px-6 py-3">Hari & Waktu</th><th class="px-6 py-3">Ruangan</th><th class="px-6 py-3">T.A.</th><th class="px-6 py-3">Aksi</th></tr></thead><tbody>${filteredSchedule.map(s => `<tr class="bg-white border-b"><td class="px-6 py-4 font-medium text-gray-900">${mataKuliahList.find(mk => mk.id === s.mataKuliahId)?.nama || ''}</td><td class="px-6 py-4">${dosenList.find(d => d.id === s.dosenId)?.name || ''}</td><td class="px-6 py-4">${s.hari}, ${s.jamMulai}-${s.jamSelesai}</td><td class="px-6 py-4">${s.ruangan}</td><td class="px-6 py-4">${academicYears.find(y => y.id === s.tahunAkademik)?.name}</td><td class="px-6 py-4 space-x-2"><button data-id="${s.id}" class="edit-schedule-btn font-medium text-blue-600 hover:underline">Edit</button><button data-id="${s.id}" class="delete-schedule-btn font-medium text-red-600 hover:underline">Hapus</button></td></tr>`).join('')}</tbody></table></div></div>
-                <div class="bg-white p-6 rounded-lg shadow-lg"><div class="flex justify-between items-center mb-4"><h3 class="text-xl font-semibold text-gray-700">Data Mata Kuliah</h3><button id="add-mk-btn" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg">Tambah MK</button></div><div class="overflow-x-auto max-h-96"><table class="w-full text-sm text-left text-gray-500"><thead class="text-xs text-gray-700 uppercase bg-gray-50"><tr><th class="px-6 py-3">Kode</th><th class="px-6 py-3">Nama Mata Kuliah</th><th class="px-6 py-3">SKS</th><th class="px-6 py-3">Prasyarat</th><th class="px-6 py-3">T.A.</th><th class="px-6 py-3">Aksi</th></tr></thead><tbody>${filteredMataKuliah.map(mk => `<tr class="bg-white border-b"><td class="px-6 py-4 font-medium text-gray-900">${mk.kode}</td><td class="px-6 py-4">${mk.nama}</td><td class="px-6 py-4">${mk.sks}</td><td class="px-6 py-4">${mk.prasyarat || '-'}</td><td class="px-6 py-4">${academicYears.find(y=>y.id===mk.tahunAkademik)?.name}</td><td class="px-6 py-4 space-x-2"><button data-id="${mk.id}" class="edit-mk-btn font-medium text-blue-600 hover:underline">Edit</button><button data-id="${mk.id}" class="delete-mk-btn font-medium text-red-600 hover:underline">Hapus</button></td></tr>`).join('')}</tbody></table></div></div>
-                <div class="bg-white p-6 rounded-lg shadow-lg"><div class="flex justify-between items-center mb-4"><h3 class="text-xl font-semibold text-gray-700">Data Dosen Wali</h3><button id="add-dosen-btn" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg">Tambah Dosen</button></div><div class="overflow-x-auto max-h-96"><table class="w-full text-sm text-left text-gray-500"><thead class="text-xs text-gray-700 uppercase bg-gray-50"><tr><th class="px-6 py-3">Nama</th><th class="px-6 py-3">NIDN</th><th class="px-6 py-3">Jabatan</th><th class="px-6 py-3">T.A.</th><th class="px-6 py-3">Aksi</th></tr></thead><tbody>${filteredDosen.map(d => `<tr class="bg-white border-b"><td class="px-6 py-4 font-medium text-gray-900">${d.name}</td><td class="px-6 py-4">${d.nidn}</td><td class="px-6 py-4">${d.jabatan}</td><td class="px-6 py-4">${academicYears.find(y=>y.id===d.tahunAkademik)?.name}</td><td class="px-6 py-4 space-x-2"><button data-id="${d.id}" class="edit-dosen-btn font-medium text-blue-600 hover:underline">Edit</button><button data-id="${d.id}" class="delete-dosen-btn font-medium text-red-600 hover:underline">Hapus</button></td></tr>`).join('')}</tbody></table></div></div>
-                <div class="bg-white p-6 rounded-lg shadow-lg"><div class="flex justify-between items-center mb-4"><h3 class="text-xl font-semibold text-gray-700">Data Mahasiswa</h3><button id="add-mhs-btn" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg">Tambah Mahasiswa</button></div><div class="overflow-x-auto max-h-96"><table class="w-full text-sm text-left text-gray-500"><thead class="text-xs text-gray-700 uppercase bg-gray-50"><tr><th class="px-6 py-3">Nama</th><th class="px-6 py-3">NIM</th><th class="px-6 py-3">Prodi</th><th class="px-6 py-3">Semester</th><th class="px-6 py-3">T.A.</th><th class="px-6 py-3">Dosen Wali</th><th class="px-6 py-3">Aksi</th></tr></thead><tbody>${filteredMahasiswa.map(m => `<tr class="bg-white border-b"><td class="px-6 py-4 font-medium text-gray-900">${m.name}</td><td class="px-6 py-4">${m.nim}</td><td class="px-6 py-4">${m.prodi}</td><td class="px-6 py-4">${m.semester}</td><td class="px-6 py-4">${academicYears.find(y=>y.id===m.tahunAkademik)?.name}</td><td class="px-6 py-4">${allUsers[m.lecturerId]?.name || 'N/A'}</td><td class="px-6 py-4 space-x-2"><button data-id="${m.id}" class="edit-mhs-btn font-medium text-blue-600 hover:underline">Edit</button><button data-id="${m.id}" class="delete-mhs-btn font-medium text-red-600 hover:underline">Hapus</button></td></tr>`).join('')}</tbody></table></div></div>
+                <div class="bg-white p-6 rounded-lg shadow-lg"><div class="flex justify-between items-center mb-4"><h3 class="text-xl font-semibold text-gray-700">Data Mata Kuliah</h3><div class="flex gap-2"><button id="copy-mk-btn" class="bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-2 px-4 rounded-lg">Salin Data</button><button id="add-mk-btn" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg">Tambah MK</button></div></div><div class="overflow-x-auto max-h-96"><table class="w-full text-sm text-left text-gray-500"><thead class="text-xs text-gray-700 uppercase bg-gray-50"><tr><th class="px-6 py-3">Kode</th><th class="px-6 py-3">Nama Mata Kuliah</th><th class="px-6 py-3">SKS</th><th class="px-6 py-3">Prasyarat</th><th class="px-6 py-3">T.A.</th><th class="px-6 py-3">Aksi</th></tr></thead><tbody>${filteredMataKuliah.map(mk => `<tr class="bg-white border-b"><td class="px-6 py-4 font-medium text-gray-900">${mk.kode}</td><td class="px-6 py-4">${mk.nama}</td><td class="px-6 py-4">${mk.sks}</td><td class="px-6 py-4">${mk.prasyarat || '-'}</td><td class="px-6 py-4">${academicYears.find(y=>y.id===mk.tahunAkademik)?.name}</td><td class="px-6 py-4 space-x-2"><button data-id="${mk.id}" class="edit-mk-btn font-medium text-blue-600 hover:underline">Edit</button><button data-id="${mk.id}" class="delete-mk-btn font-medium text-red-600 hover:underline">Hapus</button></td></tr>`).join('')}</tbody></table></div></div>
+                <div class="bg-white p-6 rounded-lg shadow-lg"><div class="flex justify-between items-center mb-4"><h3 class="text-xl font-semibold text-gray-700">Data Dosen Wali</h3><div class="flex gap-2"><button id="copy-dosen-btn" class="bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-2 px-4 rounded-lg">Salin Data</button><button id="add-dosen-btn" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg">Tambah Dosen</button></div></div><div class="overflow-x-auto max-h-96"><table class="w-full text-sm text-left text-gray-500"><thead class="text-xs text-gray-700 uppercase bg-gray-50"><tr><th class="px-6 py-3">Nama</th><th class="px-6 py-3">NIDN</th><th class="px-6 py-3">Jabatan</th><th class="px-6 py-3">T.A.</th><th class="px-6 py-3">Aksi</th></tr></thead><tbody>${filteredDosen.map(d => `<tr class="bg-white border-b"><td class="px-6 py-4 font-medium text-gray-900">${d.name}</td><td class="px-6 py-4">${d.nidn}</td><td class="px-6 py-4">${d.jabatan}</td><td class="px-6 py-4">${academicYears.find(y=>y.id===d.tahunAkademik)?.name}</td><td class="px-6 py-4 space-x-2"><button data-id="${d.id}" class="edit-dosen-btn font-medium text-blue-600 hover:underline">Edit</button><button data-id="${d.id}" class="delete-dosen-btn font-medium text-red-600 hover:underline">Hapus</button></td></tr>`).join('')}</tbody></table></div></div>
+                <div class="bg-white p-6 rounded-lg shadow-lg"><div class="flex justify-between items-center mb-4"><h3 class="text-xl font-semibold text-gray-700">Data Mahasiswa</h3><div class="flex gap-2"><button id="copy-mhs-btn" class="bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-2 px-4 rounded-lg">Salin Data</button><button id="add-mhs-btn" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg">Tambah Mahasiswa</button></div></div><div class="overflow-x-auto max-h-96"><table class="w-full text-sm text-left text-gray-500"><thead class="text-xs text-gray-700 uppercase bg-gray-50"><tr><th class="px-6 py-3">Nama</th><th class="px-6 py-3">NIM</th><th class="px-6 py-3">Prodi</th><th class="px-6 py-3">Semester</th><th class="px-6 py-3">T.A.</th><th class="px-6 py-3">Dosen Wali</th><th class="px-6 py-3">Aksi</th></tr></thead><tbody>${filteredMahasiswa.map(m => `<tr class="bg-white border-b"><td class="px-6 py-4 font-medium text-gray-900">${m.name}</td><td class="px-6 py-4">${m.nim}</td><td class="px-6 py-4">${m.prodi}</td><td class="px-6 py-4">${m.semester}</td><td class="px-6 py-4">${academicYears.find(y=>y.id===m.tahunAkademik)?.name}</td><td class="px-6 py-4">${allUsers[m.lecturerId]?.name || 'N/A'}</td><td class="px-6 py-4 space-x-2"><button data-id="${m.id}" class="edit-mhs-btn font-medium text-blue-600 hover:underline">Edit</button><button data-id="${m.id}" class="delete-mhs-btn font-medium text-red-600 hover:underline">Hapus</button></td></tr>`).join('')}</tbody></table></div></div>
             </div>`;
         }
         function DosenDashboardHTML(user, mahasiswa) {
-            const mahasiswaBinaan = mahasiswa.filter(m => m.lecturerId === user.id);
+            const mahasiswaBinaan = mahasiswa.filter(m => m.lecturerId === user.id && m.tahunAkademik === user.tahunAkademik);
             const paiCount = mahasiswaBinaan.filter(m => m.prodi === 'PAI').length;
             const hesCount = mahasiswaBinaan.filter(m => m.prodi === 'HES').length;
             const mySchedule = state.scheduleList.filter(s => s.dosenId === user.id && s.tahunAkademik === user.tahunAkademik);
@@ -813,6 +878,29 @@
                             <button type="button" id="confirm-cancel-btn" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-bold py-2 px-4 rounded-lg">Batal</button>
                             <button type="button" id="confirm-delete-btn" class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg">Ya, Hapus</button>
                         </div>
+                    </div>
+                </div>`;
+            } else if (type === 'copyData') {
+                return `<div id="modal-backdrop" class="fixed inset-0 bg-black bg-opacity-50 z-50 flex justify-center items-center p-4">
+                    <div class="bg-white p-6 rounded-lg shadow-xl w-full max-w-md relative">
+                        <button id="modal-close-btn" class="absolute top-2 right-2 text-gray-500 hover:text-gray-800 text-2xl">&times;</button>
+                        <form id="copy-data-form">
+                            <h3 class="text-xl font-semibold mb-4">Salin Data ${data.title}</h3>
+                            <div class="space-y-4">
+                                <div>
+                                    <label for="source-year-select" class="block text-sm font-medium text-gray-700">Salin dari Tahun Akademik:</label>
+                                    <select id="source-year-select" class="mt-1 block w-full p-2 border border-gray-300 bg-white rounded-md shadow-sm" required>
+                                        <option value="" disabled selected>-- Pilih Tahun Sumber --</option>
+                                        ${state.academicYears.map(y => `<option value="${y.id}">${y.name}</option>`).join('')}
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700">Ke Tahun Akademik (Aktif):</label>
+                                    <p class="mt-1 p-2 bg-gray-100 rounded-md">${state.academicYears.find(y => y.id === state.activeAcademicYear)?.name || 'Tidak ada tahun aktif'}</p>
+                                </div>
+                            </div>
+                            <button type="submit" class="mt-6 w-full bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-2 px-4 rounded-lg" ${!state.activeAcademicYear ? 'disabled' : ''}>Salin Data</button>
+                        </form>
                     </div>
                 </div>`;
             }
