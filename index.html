@@ -825,9 +825,13 @@
             const dosen = isDosen ? user : allUsers[otherUserId];
             const otherUserName = isDosen ? mahasiswa.name : dosen.name;
             const tahunAkademikNama = state.academicYears.find(y => y.id === mahasiswa.tahunAkademik)?.name || mahasiswa.tahunAkademik;
-            const jadwalKuliah = state.scheduleList.filter(s => s.tahunAkademik === mahasiswa.tahunAkademik);
             const channelId = `${dosen.id}_${mahasiswa.id}`;
             const krsId = `${mahasiswa.tahunAkademik}_${mahasiswa.id}`;
+            const studentKrs = state.krsSubmissionsList.find(krs => krs.id === krsId);
+            const isKrsApproved = studentKrs && studentKrs.status === 'Disetujui';
+            const approvedCourseIds = isKrsApproved ? studentKrs.courses.map(c => c.id) : [];
+            const approvedSchedule = state.scheduleList.filter(s => s.tahunAkademik === mahasiswa.tahunAkademik && approvedCourseIds.includes(s.mataKuliahId));
+
             onSnapshot(doc(db, `/artifacts/${appId}/public/data/krs_submissions`, krsId), (docSnap) => {
                 const krsSubmission = docSnap.exists() ? { id: docSnap.id, ...docSnap.data() } : null;
                 const availableCourses = state.mataKuliahList.filter(mk => mk.tahunAkademik === mahasiswa.tahunAkademik);
@@ -854,12 +858,12 @@
                     <div class="bg-white p-6 rounded-lg shadow-lg flex flex-col"><h3 class="text-xl font-semibold text-gray-800 border-b pb-2 mb-4">Diskusi Perwalian</h3><div id="chat-section-container"><div class="text-center text-gray-400">Memuat percakapan...</div></div></div>
                 </div>
                 ${!isDosen ? `<div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <div class="md:col-span-2 bg-white p-6 rounded-lg shadow-lg"><h3 class="text-xl font-semibold text-gray-800 border-b pb-2 mb-4">Nilai Mata Kuliah</h3>${NilaiHistoryHTML(mahasiswa)}</div>
-                    <div class="bg-white p-6 rounded-lg shadow-lg"><h3 class="text-xl font-semibold text-gray-800 border-b pb-2 mb-4">Riwayat Absensi</h3>${AbsensiHistoryHTML(mahasiswa)}</div>
+                    <div class="md:col-span-2 bg-white p-6 rounded-lg shadow-lg"><h3 class="text-xl font-semibold text-gray-800 border-b pb-2 mb-4">Nilai Mata Kuliah</h3>${NilaiHistoryHTML(mahasiswa, approvedSchedule)}</div>
+                    <div class="bg-white p-6 rounded-lg shadow-lg"><h3 class="text-xl font-semibold text-gray-800 border-b pb-2 mb-4">Riwayat Absensi</h3>${AbsensiHistoryHTML(mahasiswa, approvedSchedule)}</div>
                 </div>` : ''}
-                ${!isDosen ? `<div class="bg-white p-6 rounded-lg shadow-lg"><h3 class="text-xl font-semibold text-gray-800 border-b pb-2 mb-4">Survei Kepuasan Dosen Pengajar</h3>${SurveiStudentHTML(mahasiswa)}</div>` : ''}
-                ${!isDosen ? `<div class="bg-white p-6 rounded-lg shadow-lg"><h3 class="text-xl font-semibold text-gray-800 border-b pb-2 mb-4">Rencana Perkuliahan (SAP)</h3>${SapHistoryHTML(mahasiswa)}</div>` : ''}
-                ${!isDosen && jadwalKuliah.length > 0 ? `<div class="bg-white p-6 rounded-lg shadow-lg"><h3 class="text-xl font-semibold text-gray-800 border-b pb-2 mb-4">Jadwal Kuliah (T.A. ${tahunAkademikNama})</h3><div class="overflow-x-auto"><table class="w-full text-sm text-left text-gray-500"><thead class="text-xs text-gray-700 uppercase bg-gray-50"><tr><th class="px-4 py-2">Hari</th><th class="px-4 py-2">Waktu</th><th class="px-4 py-2">Mata Kuliah</th><th class="px-4 py-2">Dosen</th><th class="px-4 py-2">Ruang</th></tr></thead><tbody>${jadwalKuliah.map(s => `<tr class="border-b"><td class="px-4 py-2">${s.hari}</td><td class="px-4 py-2">${s.jamMulai}-${s.jamSelesai}</td><td class="px-4 py-2">${state.mataKuliahList.find(mk => mk.id === s.mataKuliahId)?.nama || '-'}</td><td class="px-4 py-2">${state.dosenList.find(d => d.id === s.dosenId)?.name || '-'}</td><td class="px-4 py-2">${s.ruangan}</td></tr>`).join('')}</tbody></table></div></div>` : ''}
+                ${!isDosen ? `<div class="bg-white p-6 rounded-lg shadow-lg"><h3 class="text-xl font-semibold text-gray-800 border-b pb-2 mb-4">Survei Kepuasan Dosen Pengajar</h3>${SurveiStudentHTML(mahasiswa, approvedSchedule)}</div>` : ''}
+                ${!isDosen ? `<div class="bg-white p-6 rounded-lg shadow-lg"><h3 class="text-xl font-semibold text-gray-800 border-b pb-2 mb-4">Rencana Perkuliahan (SAP)</h3>${SapHistoryHTML(mahasiswa, approvedSchedule)}</div>` : ''}
+                ${!isDosen && approvedSchedule.length > 0 ? `<div class="bg-white p-6 rounded-lg shadow-lg"><h3 class="text-xl font-semibold text-gray-800 border-b pb-2 mb-4">Jadwal Kuliah (T.A. ${tahunAkademikNama})</h3><div class="overflow-x-auto"><table class="w-full text-sm text-left text-gray-500"><thead class="text-xs text-gray-700 uppercase bg-gray-50"><tr><th class="px-4 py-2">Hari</th><th class="px-4 py-2">Waktu</th><th class="px-4 py-2">Mata Kuliah</th><th class="px-4 py-2">Dosen</th><th class="px-4 py-2">Ruang</th></tr></thead><tbody>${approvedSchedule.map(s => `<tr class="border-b"><td class="px-4 py-2">${s.hari}</td><td class="px-4 py-2">${s.jamMulai}-${s.jamSelesai}</td><td class="px-4 py-2">${state.mataKuliahList.find(mk => mk.id === s.mataKuliahId)?.nama || '-'}</td><td class="px-4 py-2">${state.dosenList.find(d => d.id === s.dosenId)?.name || '-'}</td><td class="px-4 py-2">${s.ruangan}</td></tr>`).join('')}</tbody></table></div></div>` : ''}
                 </div>
             </div>`;
         }
@@ -997,9 +1001,8 @@
                 <button type="submit" class="mt-6 w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg">Simpan Nilai</button>
             </form>`;
         }
-        function NilaiHistoryHTML(mahasiswa) {
-            const mySchedule = state.scheduleList.filter(s => s.tahunAkademik === mahasiswa.tahunAkademik);
-            if(mySchedule.length === 0) return `<p class="text-gray-500">Belum ada jadwal kuliah untuk tahun akademik ini.</p>`;
+        function NilaiHistoryHTML(mahasiswa, mySchedule) {
+            if(!mySchedule || mySchedule.length === 0) return `<p class="text-gray-500 text-sm">Tidak ada data untuk ditampilkan. Pastikan KRS Anda sudah disetujui.</p>`;
 
             return `<div class="space-y-4">${mySchedule.map(schedule => {
                 const mataKuliah = state.mataKuliahList.find(mk => mk.id === schedule.mataKuliahId);
@@ -1014,9 +1017,8 @@
                 </div>`;
             }).join('')}</div>`;
         }
-        function AbsensiHistoryHTML(mahasiswa) {
-            const mySchedule = state.scheduleList.filter(s => s.tahunAkademik === mahasiswa.tahunAkademik);
-            if (mySchedule.length === 0) return `<p class="text-gray-500">Tidak ada riwayat absensi untuk ditampilkan.</p>`;
+        function AbsensiHistoryHTML(mahasiswa, mySchedule) {
+            if (!mySchedule || mySchedule.length === 0) return `<p class="text-gray-500 text-sm">Tidak ada data untuk ditampilkan. Pastikan KRS Anda sudah disetujui.</p>`;
 
             return mySchedule.map(schedule => {
                 const mataKuliah = state.mataKuliahList.find(mk => mk.id === schedule.mataKuliahId);
@@ -1088,9 +1090,8 @@
                         </table>
                     </div>`;
         }
-        function SapHistoryHTML(mahasiswa) {
-            const mySchedule = state.scheduleList.filter(s => s.tahunAkademik === mahasiswa.tahunAkademik);
-            if (mySchedule.length === 0) return `<p class="text-gray-500">Tidak ada SAP untuk ditampilkan.</p>`;
+        function SapHistoryHTML(mahasiswa, mySchedule) {
+            if (!mySchedule || mySchedule.length === 0) return `<p class="text-gray-500 text-sm">Tidak ada data untuk ditampilkan. Pastikan KRS Anda sudah disetujui.</p>`;
             
             return `<div class="space-y-2">${mySchedule.map(schedule => {
                 const mataKuliah = state.mataKuliahList.find(mk => mk.id === schedule.mataKuliahId);
@@ -1105,9 +1106,8 @@
                 </div>`
             }).join('')}</div>`;
         }
-         function SurveiStudentHTML(mahasiswa) {
-            const mySchedule = state.scheduleList.filter(s => s.tahunAkademik === mahasiswa.tahunAkademik);
-            if (mySchedule.length === 0) return `<p class="text-gray-500">Tidak ada mata kuliah untuk disurvei.</p>`;
+         function SurveiStudentHTML(mahasiswa, mySchedule) {
+            if (!mySchedule || mySchedule.length === 0) return `<p class="text-gray-500 text-sm">Tidak ada data untuk ditampilkan. Pastikan KRS Anda sudah disetujui.</p>`;
             return `<div class="space-y-3">${mySchedule.map(schedule => {
                 const mataKuliah = state.mataKuliahList.find(mk => mk.id === schedule.mataKuliahId);
                 const dosen = state.dosenList.find(d => d.id === schedule.dosenId);
