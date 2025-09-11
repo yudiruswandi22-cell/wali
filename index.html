@@ -290,6 +290,8 @@
                     openModal('fillSurvei', schedule);
                 });
             });
+             const resetKrsBtn = document.getElementById('reset-krs-btn');
+            if(resetKrsBtn) resetKrsBtn.addEventListener('click', handleResetKrs);
 
         }
 
@@ -771,6 +773,19 @@
             }
 
         }
+        
+        async function handleResetKrs(e) {
+            const krsId = e.currentTarget.dataset.krsid;
+            try {
+                setNotification({ type: 'info', message: 'Membatalkan pengajuan KRS...' });
+                await deleteDoc(doc(db, `/artifacts/${appId}/public/data/krs_submissions`, krsId));
+                setNotification({ type: 'success', message: 'Pengajuan KRS dibatalkan. Silakan pilih kembali mata kuliah Anda.' });
+            } catch (error) {
+                setNotification({ type: 'error', message: 'Gagal membatalkan KRS.' });
+                console.error("Error resetting KRS:", error);
+            }
+        }
+
 
         // --- HTML TEMPLATE FUNCTIONS ---
         function AppHeaderHTML() { return `<header class="bg-green-800 text-white p-4 shadow-md w-full"><div class="container mx-auto flex items-center justify-between"><div class="flex items-center space-x-3"><img src="https://iili.io/KdXnlX2.png" alt="Logo STAI Al-Mas'udiyah" class="h-12 w-12 object-contain"/><h1 class="text-xl md:text-2xl font-bold">SISTEM PERWALIAN</h1></div><span class="text-sm hidden md:block">STAI Al-Mas'udiyah Sukabumi</span></div></header>`; }
@@ -852,8 +867,10 @@
             } else if (type.includes('Mk')) {
                 formContent = `<div><label class="block text-sm font-medium">Kode Mata Kuliah</label><input type="text" name="kode" value="${data?.kode || ''}" class="w-full p-2 border rounded" required /></div><div><label class="block text-sm font-medium">Nama Mata Kuliah</label><input type="text" name="nama" value="${data?.nama || ''}" class="w-full p-2 border rounded" required /></div><div><label class="block text-sm font-medium">Jumlah SKS</label><input type="number" name="sks" value="${data?.sks || ''}" class="w-full p-2 border rounded" required /></div><div><label class="block text-sm font-medium">Mata Kuliah Prasyarat (Opsional)</label><input type="text" name="prasyarat" value="${data?.prasyarat || ''}" class="w-full p-2 border rounded" /></div><div><label class="block text-sm font-medium">Tahun Akademik</label><select name="tahunAkademik" class="w-full p-2 border rounded" required><option value="" disabled selected>-- Pilih Tahun --</option>${academicYearsOptions}</select></div>`;
             } else if (type.includes('Schedule')) {
-                 const mataKuliahOptions = mataKuliahList.map(mk => `<option value="${mk.id}" ${data?.mataKuliahId === mk.id ? 'selected' : ''}>${mk.nama}</option>`).join('');
-                 const dosenOptions = dosenList.map(d => `<option value="${d.id}" ${data?.dosenId === d.id ? 'selected' : ''}>${d.name}</option>`).join('');
+                 const filteredMataKuliah = state.activeAcademicYear ? mataKuliahList.filter(mk => mk.tahunAkademik === state.activeAcademicYear) : mataKuliahList;
+                 const filteredDosen = state.activeAcademicYear ? dosenList.filter(d => d.tahunAkademik === state.activeAcademicYear) : dosenList;
+                 const mataKuliahOptions = filteredMataKuliah.map(mk => `<option value="${mk.id}" ${data?.mataKuliahId === mk.id ? 'selected' : ''}>${mk.nama}</option>`).join('');
+                 const dosenOptions = filteredDosen.map(d => `<option value="${d.id}" ${data?.dosenId === d.id ? 'selected' : ''}>${d.name}</option>`).join('');
                  const hariOptions = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'].map(h => `<option value="${h}" ${data?.hari === h ? 'selected' : ''}>${h}</option>`).join('');
                  formContent = `<div><label class="block text-sm font-medium">Tahun Akademik</label><select name="tahunAkademik" class="w-full p-2 border rounded" required><option value="" disabled selected>-- Pilih --</option>${academicYearsOptions}</select></div><div><label class="block text-sm font-medium">Mata Kuliah</label><select name="mataKuliahId" class="w-full p-2 border rounded" required><option value="" disabled selected>-- Pilih --</option>${mataKuliahOptions}</select></div><div><label class="block text-sm font-medium">Dosen Pengampu</label><select name="dosenId" class="w-full p-2 border rounded" required><option value="" disabled selected>-- Pilih --</option>${dosenOptions}</select></div><div><label class="block text-sm font-medium">Hari</label><select name="hari" class="w-full p-2 border rounded" required><option value="" disabled selected>-- Pilih --</option>${hariOptions}</select></div><div class="grid grid-cols-2 gap-4"><div><label class="block text-sm font-medium">Jam Mulai</label><input type="time" name="jamMulai" value="${data?.jamMulai || ''}" class="w-full p-2 border rounded" required /></div><div><label class="block text-sm font-medium">Jam Selesai</label><input type="time" name="jamSelesai" value="${data?.jamSelesai || ''}" class="w-full p-2 border rounded" required /></div></div><div><label class="block text-sm font-medium">Ruangan</label><input type="text" name="ruangan" value="${data?.ruangan || ''}" class="w-full p-2 border rounded" required /></div>`;
             } else if (type === 'fillSurvei') {
@@ -956,15 +973,32 @@
         }
         function KrsSectionHTML(user, krsSubmission, availableCourses) {
             const isDosen = user.role === 'dosen';
-            if (krsSubmission) {
-                const statusColor = { 'Menunggu': 'bg-yellow-100 text-yellow-800', 'Disetujui': 'bg-green-100 text-green-800', 'Ditolak': 'bg-red-100 text-red-800'}[krsSubmission.status];
-                const submissionDate = new Date(krsSubmission.submittedAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
-                const reviewedDate = krsSubmission.reviewedAt ? new Date(krsSubmission.reviewedAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }) : null;
-                return `<div><div class="flex justify-between items-center mb-1"><h4 class="text-lg font-semibold">${isDosen ? 'KRS Mahasiswa' : 'KRS Anda'}</h4><span class="px-3 py-1 text-sm font-bold rounded-full ${statusColor}">${krsSubmission.status}</span></div><p class="text-xs text-gray-500 mb-4">Diajukan pada: ${submissionDate}</p><div class="border rounded-lg p-4 space-y-2">${krsSubmission.courses.map(c => `<div class="flex justify-between items-center text-sm"><span>${c.kode} - ${c.nama}</span><span class="font-semibold">${c.sks} SKS</span></div>`).join('')}<div class="flex justify-between items-center font-bold border-t pt-2 mt-2"><span>Total SKS</span><span>${krsSubmission.totalSks} SKS</span></div></div>${reviewedDate ? `<p class="text-xs text-gray-500 mt-2 text-right">Ditinjau pada: ${reviewedDate}</p>` : ''}${krsSubmission.dosenNotes ? `<div class="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm"><p class="font-bold mb-1">Catatan dari Dosen:</p><p>${krsSubmission.dosenNotes}</p></div>` : ''}${isDosen && krsSubmission.status === 'Menunggu' ? `<div class="mt-6 flex gap-4"><button id="approve-krs-btn" data-krsid="${krsSubmission.id}" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg">Setujui</button><button id="reject-krs-btn" data-krsid="${krsSubmission.id}" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg">Tolak</button></div>` : ''}</div>`;
-            } else {
-                if (isDosen) return `<p class="text-center text-gray-500 py-10">Mahasiswa belum mengajukan KRS untuk tahun akademik ini.</p>`;
-                return `<form id="krs-form"><h4 class="text-lg font-semibold mb-2">Pilih Mata Kuliah</h4><div class="space-y-2 max-h-64 overflow-y-auto border rounded-lg p-4 mb-4">${availableCourses.length > 0 ? availableCourses.map(mk => `<label class="flex items-center p-2 rounded-md hover:bg-gray-50"><input type="checkbox" value="${mk.id}" data-sks="${mk.sks}" data-kode="${mk.kode}" data-nama="${mk.nama}" class="h-4 w-4 text-green-600 border-gray-300 rounded focus:ring-green-500"><span class="ml-3 text-sm flex-grow">${mk.kode} - ${mk.nama}</span><span class="text-sm font-semibold">${mk.sks} SKS</span></label>`).join('') : '<p class="text-gray-500">Tidak ada mata kuliah yang tersedia untuk tahun akademik Anda.</p>'}</div><div class="flex justify-between items-center font-bold text-lg mb-4"><span>Total SKS Dipilih:</span><span id="total-sks">0</span></div><button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg">Ajukan KRS</button></form>`;
+
+            if (isDosen) {
+                if (krsSubmission) {
+                    const statusColor = { 'Menunggu': 'bg-yellow-100 text-yellow-800', 'Disetujui': 'bg-green-100 text-green-800', 'Ditolak': 'bg-red-100 text-red-800'}[krsSubmission.status];
+                    const submissionDate = new Date(krsSubmission.submittedAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+                    const reviewedDate = krsSubmission.reviewedAt ? new Date(krsSubmission.reviewedAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }) : null;
+                    return `<div><div class="flex justify-between items-center mb-1"><h4 class="text-lg font-semibold">KRS Mahasiswa</h4><span class="px-3 py-1 text-sm font-bold rounded-full ${statusColor}">${krsSubmission.status}</span></div><p class="text-xs text-gray-500 mb-4">Diajukan pada: ${submissionDate}</p><div class="border rounded-lg p-4 space-y-2">${krsSubmission.courses.map(c => `<div class="flex justify-between items-center text-sm"><span>${c.kode} - ${c.nama}</span><span class="font-semibold">${c.sks} SKS</span></div>`).join('')}<div class="flex justify-between items-center font-bold border-t pt-2 mt-2"><span>Total SKS</span><span>${krsSubmission.totalSks} SKS</span></div></div>${reviewedDate ? `<p class="text-xs text-gray-500 mt-2 text-right">Ditinjau pada: ${reviewedDate}</p>` : ''}${krsSubmission.dosenNotes ? `<div class="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm"><p class="font-bold mb-1">Catatan dari Dosen:</p><p>${krsSubmission.dosenNotes}</p></div>` : ''}${krsSubmission.status === 'Menunggu' ? `<div class="mt-6 flex gap-4"><button id="approve-krs-btn" data-krsid="${krsSubmission.id}" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg">Setujui</button><button id="reject-krs-btn" data-krsid="${krsSubmission.id}" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg">Tolak</button></div>` : ''}</div>`;
+                } else {
+                    return `<p class="text-center text-gray-500 py-10">Mahasiswa belum mengajukan KRS untuk tahun akademik ini.</p>`;
+                }
             }
+            
+            // Student View
+            if (krsSubmission && (krsSubmission.status === 'Disetujui' || krsSubmission.status === 'Menunggu')) {
+                 const statusColor = { 'Menunggu': 'bg-yellow-100 text-yellow-800', 'Disetujui': 'bg-green-100 text-green-800'}[krsSubmission.status];
+                const submissionDate = new Date(krsSubmission.submittedAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+                return `<div><div class="flex justify-between items-center mb-1"><h4 class="text-lg font-semibold">KRS Anda</h4><span class="px-3 py-1 text-sm font-bold rounded-full ${statusColor}">${krsSubmission.status}</span></div><p class="text-xs text-gray-500 mb-4">Diajukan pada: ${submissionDate}</p><div class="border rounded-lg p-4 space-y-2">${krsSubmission.courses.map(c => `<div class="flex justify-between items-center text-sm"><span>${c.kode} - ${c.nama}</span><span class="font-semibold">${c.sks} SKS</span></div>`).join('')}<div class="flex justify-between items-center font-bold border-t pt-2 mt-2"><span>Total SKS</span><span>${krsSubmission.totalSks} SKS</span></div></div> ${krsSubmission.status === 'Menunggu' ? `<button id="reset-krs-btn" data-krsid="${krsSubmission.id}" class="mt-4 w-full bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-2 px-4 rounded-lg">Ubah KRS</button>` : ''} </div>`;
+            }
+
+            // Show form if rejected or no submission
+            let rejectionNotesHTML = '';
+            if (krsSubmission && krsSubmission.status === 'Ditolak') {
+                rejectionNotesHTML = `<div class="mb-4 p-3 bg-red-100 border border-red-300 text-red-800 rounded-lg text-sm"><p class="font-bold mb-1">Catatan Penolakan dari Dosen Wali:</p><p>${krsSubmission.dosenNotes || 'Tidak ada catatan.'}</p></div>`;
+            }
+
+            return `${rejectionNotesHTML}<form id="krs-form"><h4 class="text-lg font-semibold mb-2">Pilih Mata Kuliah</h4><div class="space-y-2 max-h-64 overflow-y-auto border rounded-lg p-4 mb-4">${availableCourses.length > 0 ? availableCourses.map(mk => `<label class="flex items-center p-2 rounded-md hover:bg-gray-50"><input type="checkbox" value="${mk.id}" data-sks="${mk.sks}" data-kode="${mk.kode}" data-nama="${mk.nama}" class="h-4 w-4 text-green-600 border-gray-300 rounded focus:ring-green-500"><span class="ml-3 text-sm flex-grow">${mk.kode} - ${mk.nama}</span><span class="text-sm font-semibold">${mk.sks} SKS</span></label>`).join('') : '<p class="text-gray-500">Tidak ada mata kuliah yang tersedia untuk tahun akademik Anda.</p>'}</div><div class="flex justify-between items-center font-bold text-lg mb-4"><span>Total SKS Dipilih:</span><span id="total-sks">0</span></div><button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg">Ajukan KRS</button></form>`;
         }
         function ChatSectionHTML(user, messages, allUsers, otherUserId) {
              const sortedMessages = [...messages].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
@@ -1294,6 +1328,15 @@
                         onSnapshot(collection(db, `/artifacts/${appId}/public/data/survei_responses`), (snapshot) => {
                             const responses = []; snapshot.forEach(doc => responses.push({ id: doc.id, ...doc.data() }));
                             state.surveiResponses = responses; state.loadingSurvei = false; render();
+                        });
+                         onSnapshot(collection(db, `/artifacts/${appId}/public/data/skripsi_submissions`), (snapshot) => {
+                            const submissions = {};
+                            snapshot.forEach(doc => {
+                                submissions[doc.id] = { id: doc.id, ...doc.data() };
+                            });
+                            state.skripsiSubmissions = submissions;
+                            state.loadingSkripsi = false;
+                            render();
                         });
                         onSnapshot(doc(db, `/artifacts/${appId}/public/data/settings`, 'app_config'), (docSnap) => {
                             state.activeAcademicYear = docSnap.exists() ? docSnap.data().activeAcademicYear : null; state.loadingSettings = false; render();
